@@ -1,0 +1,6 @@
+{
+	"$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/packages/cspell-types/cspell.schema.json",
+	"import": ["./cspell.base.json"],
+	"words": ["darraghor"],
+	"ignorePaths": ["node_modules", "package-lock.json"]
+}

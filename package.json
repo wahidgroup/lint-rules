@@ -1,0 +1,100 @@
+{
+	"name": "@wahidgroup/lint-rules",
+	"version": "0.1.0",
+	"description": "Shared ESLint, Prettier, TypeScript, EditorConfig, and CSpell configs for TypeScript projects",
+	"type": "module",
+	"private": false,
+	"license": "MIT",
+	"keywords": [
+		"eslint",
+		"prettier",
+		"typescript",
+		"cspell",
+		"editorconfig",
+		"lint",
+		"wahidgroup"
+	],
+	"homepage": "https://github.com/wahidgroup/ts-lint#readme",
+	"bugs": {
+		"url": "https://github.com/wahidgroup/ts-lint/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/wahidgroup/ts-lint.git"
+	},
+	"engines": {
+		"node": ">=24"
+	},
+	"files": [
+		"LICENSE",
+		"README.md",
+		".editorconfig",
+		"eslint/",
+		"prettier.mjs",
+		"tsconfig.base.json",
+		"cspell.base.json"
+	],
+	"scripts": {
+		"lint": "eslint .",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"spellcheck": "cspell \"**/*\"",
+		"smoke": "node ./scripts/smoke-exports.mjs"
+	},
+	"exports": {
+		"./package.json": "./package.json",
+		"./eslint/base": "./eslint/base.mjs",
+		"./eslint/react": "./eslint/react.mjs",
+		"./eslint/nestjs": "./eslint/nestjs.mjs",
+		"./eslint/playwright": "./eslint/playwright.mjs",
+		"./eslint/strict": "./eslint/strict.mjs",
+		"./prettier": "./prettier.mjs",
+		"./tsconfig": "./tsconfig.base.json",
+		"./cspell": "./cspell.base.json",
+		"./editorconfig": "./.editorconfig"
+	},
+	"dependencies": {
+		"@eslint/js": "9.39.2",
+		"eslint-config-prettier": "10.1.8",
+		"eslint-plugin-import": "2.32.0",
+		"typescript-eslint": "8.61.1"
+	},
+	"publishConfig": {
+		"registry": "https://npm.pkg.github.com"
+	},
+	"peerDependencies": {
+		"@darraghor/eslint-plugin-nestjs-typed": "^7.2.4",
+		"eslint-plugin-jsx-a11y": "^6.10.2",
+		"eslint-plugin-playwright": "^2.10.4",
+		"eslint-plugin-react-hooks": "^7.1.1",
+		"eslint": ">=9",
+		"prettier": ">=3",
+		"typescript": ">=5"
+	},
+	"peerDependenciesMeta": {
+		"@darraghor/eslint-plugin-nestjs-typed": {
+			"optional": true
+		},
+		"eslint-plugin-jsx-a11y": {
+			"optional": true
+		},
+		"eslint-plugin-playwright": {
+			"optional": true
+		},
+		"eslint-plugin-react-hooks": {
+			"optional": true
+		},
+		"prettier": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@darraghor/eslint-plugin-nestjs-typed": "7.2.4",
+		"cspell": "9.7.0",
+		"eslint": "9.39.2",
+		"eslint-plugin-jsx-a11y": "6.10.2",
+		"eslint-plugin-playwright": "2.10.4",
+		"eslint-plugin-react-hooks": "7.1.1",
+		"prettier": "3.8.4"
+	}
+}

@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "releases/v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Publish & Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Detect package scope
+        id: pkg
+        run: echo "scope=$(node -p "require('./package.json').name.split('/')[0]")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://npm.pkg.github.com
+          scope: ${{ steps.pkg.outputs.scope }}
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: make setup
+
+      - name: CI
+        run: make ci
+
+      - name: Verify version matches tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#releases/v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" != "$VERSION" ]; then
+            echo "package.json version (${CURRENT}) does not match tag (${VERSION})"
+            echo "Bump package.json on main via make release before tagging."
+            exit 1
+          fi
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          name: v${{ env.VERSION }}
+          generate_release_notes: true
