@@ -1,6 +1,6 @@
 {
 	"name": "@wahidgroup/lint-rules",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Shared ESLint, Prettier, TypeScript, EditorConfig, and CSpell configs for TypeScript projects",
 	"type": "module",
 	"private": false,
