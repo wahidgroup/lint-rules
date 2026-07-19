@@ -120,7 +120,9 @@ detect_version() {
 
 bump_version() {
 	local version="$1"
-	case "$(detect_version_source)" in
+	local source
+	source="$(detect_version_source)"
+	case "$source" in
 		npm)
 			npm version "$version" --no-git-tag-version --allow-same-version
 			git add package.json
@@ -130,6 +132,9 @@ bump_version() {
 		file)
 			printf '%s\n' "$version" > VERSION
 			git add VERSION
+			;;
+		*)
+			fail "No version source found (need package.json or VERSION)"
 			;;
 	esac
 	ok "Version updated to ${version}"
@@ -766,6 +771,8 @@ detect_resume_state() {
 		fail "Previous release PR #${PR_NUMBER} for ${BRANCH} was closed without merging. Delete the branch (git push origin --delete ${BRANCH}) or reopen PR #${PR_NUMBER}, then retry."
 	elif remote_head_exists "$BRANCH"; then
 		RESUME_STATE="pr"
+		# Need local checkout of process/v* so changelog/PR body use release history.
+		RESUME_NEEDS_CHECKOUT=true
 		info "[resume] Branch ${BRANCH} exists on remote, creating PR..."
 	elif git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
 		if [[ "$RELEASE_MODE" == "backport" ]]; then
@@ -783,8 +790,8 @@ detect_resume_state() {
 				tip_version=$(git show "${BRANCH}:VERSION" | tr -d '\n' || true)
 			fi
 
-			# Matching tip + dirty tree must fail (not delete).
 			if [[ "$tip_subject" == "chore(release):"* && "$tip_version" == "$VERSION" ]]; then
+				# Finished release tip: clean tree required to resume.
 				if ! git diff --quiet --ignore-submodules \
 					|| ! git diff --cached --quiet --ignore-submodules; then
 					fail "Working tree has uncommitted changes; clean tree required to resume ${BRANCH}"
@@ -792,8 +799,14 @@ detect_resume_state() {
 				RESUME_STATE="local"
 				RESUME_NEEDS_CHECKOUT=true
 				info "[resume] Local branch ${BRANCH} found, resuming forward release..."
+			elif [[ "$tip_subject" == "chore(release):"* ]]; then
+				# Wrong-version release tip: fail closed (do not auto-delete).
+				fail "Local branch ${BRANCH} tip is chore(release) for v${tip_version:-unknown}, not v${VERSION}. Delete it (git branch -D ${BRANCH}) or finish that release, then retry."
 			else
-				fail "Local branch ${BRANCH} exists but tip is not chore(release): v${VERSION}. Delete it (git branch -D ${BRANCH}) or finish the release tip, then retry."
+				# In-progress process branch (no release commit yet): continue.
+				RESUME_STATE="local"
+				RESUME_NEEDS_CHECKOUT=true
+				info "[resume] Local branch ${BRANCH} found (in progress), resuming forward release..."
 			fi
 		fi
 	fi
@@ -807,9 +820,31 @@ enter_resume_workspace() {
 	if [[ "${RESUME_NEEDS_CHECKOUT}" != true ]]; then
 		return 0
 	fi
-	if ! git checkout "$BRANCH" --quiet; then
-		fail "Could not checkout ${BRANCH} to resume release"
+
+	# pr resume needs origin tip; local resume may work offline from local ref.
+	if [[ "$RESUME_STATE" == "pr" ]]; then
+		if ! git fetch origin "$BRANCH" --quiet; then
+			fail "Could not fetch origin/${BRANCH}"
+		fi
+	else
+		git fetch origin "$BRANCH" --quiet 2>/dev/null || true
 	fi
+
+	if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+		if ! git checkout "$BRANCH" --quiet; then
+			fail "Could not checkout ${BRANCH} to resume release"
+		fi
+		return 0
+	fi
+
+	if git rev-parse --verify "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
+		if ! git checkout -b "$BRANCH" --track "origin/${BRANCH}" --quiet; then
+			fail "Could not create local ${BRANCH} from origin/${BRANCH}"
+		fi
+		return 0
+	fi
+
+	fail "Could not checkout ${BRANCH}: no local or origin/${BRANCH} ref"
 }
 
 mark_release_commit_exists() {
@@ -1139,8 +1174,9 @@ main() {
 		run_yank
 	fi
 
-	require_jq
+	# Tag-complete exits here (gh --jq only); external jq needed after this.
 	detect_resume_state
+	require_jq
 	enter_resume_workspace
 	mark_release_commit_exists
 	assert_version_bump_ok
