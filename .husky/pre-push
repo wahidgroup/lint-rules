@@ -1,3 +1,4 @@
+set -e
 make lint
 
 remote="$1"
