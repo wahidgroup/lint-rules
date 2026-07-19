@@ -695,17 +695,28 @@ elif git branch --list "$BRANCH" | grep -q "$BRANCH"; then
 		git checkout "$BRANCH" --quiet
 		info "[resume] Local branch ${BRANCH} found, resuming after cherry-pick..."
 	else
-		# Forward: resume only a matching clean release tip; otherwise drop stale branch.
-		git checkout "$BRANCH" --quiet
-		if [[ "$(git log -1 --pretty=%s 2>/dev/null)" == "chore(release):"* ]] \
-			&& [[ "$(detect_version)" == "$VERSION" ]] \
+		# Forward: inspect tip without checkout first.
+		tip_subject=$(git log -1 --pretty=%s "$BRANCH" 2>/dev/null || true)
+		tip_version=""
+		if git cat-file -e "${BRANCH}:package.json" 2>/dev/null; then
+			tip_version=$(git show "${BRANCH}:package.json" \
+				| node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || true)
+		elif git cat-file -e "${BRANCH}:VERSION" 2>/dev/null; then
+			tip_version=$(git show "${BRANCH}:VERSION" | tr -d '\n' || true)
+		fi
+
+		if [[ "$tip_subject" == "chore(release):"* ]] \
+			&& [[ "$tip_version" == "$VERSION" ]] \
 			&& git diff --quiet --ignore-submodules \
-			&& git diff --cached --quiet --ignore-submodules; then
+			&& git diff --cached --quiet --ignore-submodules \
+			&& git checkout "$BRANCH" --quiet; then
 			RESUME_STATE="local"
 			info "[resume] Local branch ${BRANCH} found, resuming forward release..."
 		else
 			info "[cleanup] Removed stale local branch, starting fresh..."
-			git checkout "$DEFAULT_BRANCH" 2>/dev/null || true
+			if [[ "$(git branch --show-current 2>/dev/null)" == "$BRANCH" ]]; then
+				git checkout "$DEFAULT_BRANCH" 2>/dev/null || true
+			fi
 			git branch -D "$BRANCH" 2>/dev/null || true
 		fi
 	fi
@@ -836,6 +847,7 @@ if [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]]; then
 	fi
 
 	# Fresh forward only: must start from up-to-date DEFAULT_BRANCH.
+	# Local resume is already on process/v* with a matching release tip.
 	if [[ "$RELEASE_MODE" == "forward" && "$RESUME_STATE" == "fresh" ]]; then
 		CURRENT_BRANCH=$(git branch --show-current)
 		if [[ "$CURRENT_BRANCH" == "$DEFAULT_BRANCH" ]]; then
