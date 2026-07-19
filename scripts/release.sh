@@ -333,6 +333,8 @@ resolve_submodule_ref() {
 	local name="$1"
 	local ref="$2"
 
+	git submodule update --init -- "$name"
+
 	if ! git -C "$name" diff --quiet || ! git -C "$name" diff --cached --quiet; then
 		fail "${name}: has uncommitted changes"
 	fi
@@ -684,6 +686,14 @@ require_gh() {
 	fi
 }
 
+require_jq() {
+	if command -v jq &>/dev/null; then
+		ok "jq available"
+	else
+		fail "jq is required for release notes (https://jqlang.github.io/jq/)"
+	fi
+}
+
 run_yank() {
 	if remote_tag_exists "$YANKED_TAG"; then
 		ok "Version v${VERSION} is already yanked (${YANKED_TAG} exists)"
@@ -1022,9 +1032,21 @@ push_and_open_pr() {
 		ok "Branch pushed to origin"
 	elif [[ "$RESUME_STATE" == "pr" ]] \
 		&& git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-		# Remote branch exists; still push local tip if present so PR is not stale.
-		git push origin "$BRANCH"
-		ok "Local ${BRANCH} pushed to origin"
+		# Push only when local is strictly ahead.
+		git fetch origin "$BRANCH" --quiet
+		local local_sha remote_sha
+		local_sha=$(git rev-parse "$BRANCH")
+		remote_sha=$(git rev-parse "refs/remotes/origin/${BRANCH}")
+		if [[ "$local_sha" == "$remote_sha" ]]; then
+			ok "Local ${BRANCH} already matches origin"
+		elif git merge-base --is-ancestor "$local_sha" "$remote_sha"; then
+			info "Local ${BRANCH} is behind origin - skipping push"
+		elif git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+			git push origin "$BRANCH"
+			ok "Local ${BRANCH} pushed to origin"
+		else
+			fail "Local ${BRANCH} and origin/${BRANCH} have diverged. Update or delete the local branch, then retry."
+		fi
 	fi
 
 	compile_changelog
@@ -1050,10 +1072,18 @@ push_and_open_pr() {
 		fi
 	done < <({ printf 'release\n'; printf '%s\n' "${RELEASE_LABELS:-}"; } | sort -u)
 
-	local pr_url
-	pr_url=$(gh pr create "${pr_create_args[@]}")
-	PR_NUMBER="${pr_url##*/}"
-	ok "PR #${PR_NUMBER} created: ${pr_url}"
+	local pr_url existing_pr
+	existing_pr=$(gh pr list --head "$BRANCH" --state open --json number,url \
+		--jq '.[0] | select(.number != null) | "\(.number) \(.url)"' 2>/dev/null || true)
+	if [[ -n "$existing_pr" ]]; then
+		read -r PR_NUMBER pr_url <<< "$existing_pr"
+		gh pr edit "$PR_NUMBER" --title "chore(release): v${VERSION}" --body "$CHANGELOG" >/dev/null
+		ok "PR #${PR_NUMBER} already open: ${pr_url}"
+	else
+		pr_url=$(gh pr create "${pr_create_args[@]}")
+		PR_NUMBER="${pr_url##*/}"
+		ok "PR #${PR_NUMBER} created: ${pr_url}"
+	fi
 }
 
 wait_for_merge() {
@@ -1109,6 +1139,7 @@ main() {
 		run_yank
 	fi
 
+	require_jq
 	detect_resume_state
 	enter_resume_workspace
 	mark_release_commit_exists
