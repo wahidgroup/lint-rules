@@ -236,14 +236,17 @@ version_at_ref() {
 # Changelog / summary / gh helpers
 # ---------------------------------------------------------------------------
 
+# Usage: compile_changelog [ref]
 compile_changelog() {
+	local ref="${1:-HEAD}"
+
 	if [[ -n "${CHANGELOG:-}" ]]; then
 		return 0
 	fi
 
 	local last_tag
-	last_tag=$(git describe --tags --match "releases/v*" --abbrev=0 2>/dev/null) \
-		|| last_tag=$(git rev-list --max-parents=0 HEAD)
+	last_tag=$(git describe --tags --match "releases/v*" --abbrev=0 "$ref" 2>/dev/null) \
+		|| last_tag=$(git rev-list --max-parents=0 "$ref")
 
 	local date_str
 	date_str=$(date +%Y-%m-%d)
@@ -274,7 +277,7 @@ compile_changelog() {
 
 	local body=""
 	local merge_subjects
-	merge_subjects=$(git log "${last_tag}..HEAD" --merges --format="%s")
+	merge_subjects=$(git log "${last_tag}..${ref}" --merges --format="%s")
 
 	local labels=""
 
@@ -325,8 +328,9 @@ ${body}"
 	fi
 }
 
+# Usage: print_release_notes [ref]
 print_release_notes() {
-	compile_changelog
+	compile_changelog "${1:-HEAD}"
 	printf "\n"
 	printf "  ${BOLD}Release Notes (v%s)${RESET}\n" "$VERSION"
 	printf "  ──────────────────────────────────\n"
@@ -998,14 +1002,29 @@ align_pr_branch_to_origin() {
 }
 
 # Apply workspace mutation required by detected resume state.
+# Sets NOTES_REF: the ref release-note previews read history from.
 enter_resume_workspace() {
+	NOTES_REF="HEAD"
+
 	if [[ "${RESUME_NEEDS_CHECKOUT}" != true ]]; then
 		return 0
 	fi
 
-	# Dry run must not checkout or reset anything.
+	# Dry run must not checkout or reset anything; preview reads the branch
+	# ref directly instead (fetch only updates remote-tracking refs).
 	if [[ "$DRY_RUN" == true ]]; then
-		info "Dry run: skipping checkout of ${BRANCH} (notes preview uses current HEAD)"
+		git fetch origin "$BRANCH" --quiet 2>/dev/null || true
+		if [[ "$RESUME_STATE" == "pr" ]] \
+			&& git rev-parse --verify "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
+			NOTES_REF="refs/remotes/origin/${BRANCH}"
+		elif git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+			NOTES_REF="refs/heads/${BRANCH}"
+		elif git rev-parse --verify "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
+			NOTES_REF="refs/remotes/origin/${BRANCH}"
+		else
+			fail "Could not resolve ${BRANCH} for dry run preview (no local or origin ref)"
+		fi
+		info "Dry run: skipping checkout of ${BRANCH} (notes preview uses ${NOTES_REF})"
 		return 0
 	fi
 
@@ -1038,11 +1057,12 @@ enter_resume_workspace() {
 	fail "Could not checkout ${BRANCH}: no local or origin/${BRANCH} ref"
 }
 
+# Reads NOTES_REF so dry-run resume reflects the branch tip, not current HEAD.
 mark_release_commit_exists() {
 	RELEASE_COMMIT_EXISTS=false
 	if [[ "$RESUME_STATE" == "local" ]] \
-		&& [[ "$(git log -1 --pretty=%s 2>/dev/null)" == "chore(release):"* ]] \
-		&& [[ "$(detect_version)" == "$VERSION" ]] \
+		&& [[ "$(git log -1 --pretty=%s "$NOTES_REF" 2>/dev/null)" == "chore(release):"* ]] \
+		&& [[ "$(version_at_ref "$NOTES_REF")" == "$VERSION" ]] \
 		&& working_tree_clean; then
 		RELEASE_COMMIT_EXISTS=true
 	fi
@@ -1060,8 +1080,9 @@ assert_version_bump_ok() {
 			info "Version already at ${VERSION} - resuming incomplete release"
 		elif [[ "$cmp" == "lt" ]]; then
 			fail "Requested version ${VERSION} is older than current ${CURRENT_VERSION}"
+		else
+			ok "Version bump: ${CURRENT_VERSION} -> ${VERSION}"
 		fi
-		ok "Version bump: ${CURRENT_VERSION} -> ${VERSION}"
 	fi
 
 	if [[ ( "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ) && "$RELEASE_MODE" == "backport" ]]; then
@@ -1076,8 +1097,9 @@ assert_version_bump_ok() {
 				info "Version already at ${VERSION} on ${RELEASE_BRANCH} - resuming incomplete release"
 			elif [[ "$cmp" == "lt" ]]; then
 				fail "Requested version ${VERSION} is older than latest ${line_ver} on ${RELEASE_BRANCH}"
+			else
+				ok "Backport bump: ${line_ver} -> ${VERSION}"
 			fi
-			ok "Backport bump: ${line_ver} -> ${VERSION}"
 		fi
 	fi
 }
@@ -1176,7 +1198,7 @@ validate_preconditions() {
 
 run_dry_run() {
 	header "Release notes preview"
-	print_release_notes
+	print_release_notes "$NOTES_REF"
 	printf "\n"
 	info "Dry run complete. No changes were made."
 	print_summary
