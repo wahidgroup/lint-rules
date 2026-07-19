@@ -835,7 +835,8 @@ if [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]]; then
 		ok "Working tree is clean (excluding submodules)"
 	fi
 
-	if [[ "$RELEASE_MODE" == "forward" ]]; then
+	# Fresh forward only: must start from up-to-date DEFAULT_BRANCH.
+	if [[ "$RELEASE_MODE" == "forward" && "$RESUME_STATE" == "fresh" ]]; then
 		CURRENT_BRANCH=$(git branch --show-current)
 		if [[ "$CURRENT_BRANCH" == "$DEFAULT_BRANCH" ]]; then
 			ok "On branch ${DEFAULT_BRANCH}"
