@@ -4,6 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAMP_DIR="$ROOT/.make"
 SETUP_HASH_FILE="$STAMP_DIR/setup.hash"
+LOCK_FILE="$STAMP_DIR/setup.lock"
+LOCK_DIR="$STAMP_DIR/setup.lock.d"
+LOCK_FD=9
+LOCK_KIND=""
 
 # GitHub Actions sets CI=true; prefer lockfile-faithful installs there.
 NPM_INSTALL_CMD=install
@@ -42,9 +46,46 @@ setup_required() {
 	return 1
 }
 
+release_lock() {
+	if [ "$LOCK_KIND" = "flock" ]; then
+		flock -u "$LOCK_FD" 2>/dev/null || true
+		eval "exec ${LOCK_FD}>&-"
+	elif [ "$LOCK_KIND" = "mkdir" ]; then
+		rmdir "$LOCK_DIR" 2>/dev/null || true
+	fi
+	LOCK_KIND=""
+}
+
+acquire_lock() {
+	# Serialize npm install across parallel make jobs / concurrent setup.sh.
+	if command -v flock >/dev/null 2>&1; then
+		eval "exec ${LOCK_FD}>\"\$LOCK_FILE\""
+		if ! flock -w 600 "$LOCK_FD"; then
+			echo "ERROR: timed out waiting for setup lock (${LOCK_FILE})." >&2
+			exit 1
+		fi
+		LOCK_KIND=flock
+		return
+	fi
+
+	local waited=0
+	while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+		if [ "$waited" -ge 600 ]; then
+			echo "ERROR: timed out waiting for setup lock (${LOCK_DIR})." >&2
+			exit 1
+		fi
+		sleep 1
+		waited=$((waited + 1))
+	done
+	LOCK_KIND=mkdir
+}
+
 main() {
 	mkdir -p "$STAMP_DIR"
+	acquire_lock
+	trap release_lock EXIT
 
+	# Re-check under lock: waiter may find stamp already written.
 	if setup_required; then
 		echo "Installing dependencies (npm ${NPM_INSTALL_CMD})..."
 		# shellcheck disable=SC2086
