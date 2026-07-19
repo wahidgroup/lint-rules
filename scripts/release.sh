@@ -7,6 +7,9 @@ set -euo pipefail
 PROJECT_NAME="$(git remote get-url origin 2>/dev/null \
 	| sed -e 's|.*/||' -e 's/\.git$//' || echo 'unknown')"
 
+# Default development branch (forward releases cut from here)
+DEFAULT_BRANCH="main"
+
 # ---------------------------------------------------------------------------
 # Colors and formatting
 # ---------------------------------------------------------------------------
@@ -378,9 +381,9 @@ ensure_release_branch() {
 		done < <(git tag --list "releases/v${major}.*" --sort=-v:refname)
 		if [[ -z "$base_tag" ]]; then
 			# No lower minor line exists (always true for a new .0 line):
-			# cut from main, per the standard "release lines branch from main" model
-			git fetch origin main --quiet
-			base_tag="origin/main"
+			# cut from DEFAULT_BRANCH, per the standard release-lines model
+			git fetch origin "$DEFAULT_BRANCH" --quiet
+			base_tag="origin/${DEFAULT_BRANCH}"
 		fi
 	fi
 
@@ -392,10 +395,10 @@ ensure_release_branch() {
 interactive_cherry_pick() {
 	local release_branch="$1"
 
-	git fetch origin main --quiet
+	git fetch origin "$DEFAULT_BRANCH" --quiet
 	local commits
 	commits=$(git log --oneline --cherry-pick --right-only \
-		"${release_branch}...origin/main" --no-merges 2>/dev/null || true)
+		"${release_branch}...origin/${DEFAULT_BRANCH}" --no-merges 2>/dev/null || true)
 
 	if [[ -z "$commits" ]]; then
 		info "No commits available to cherry-pick since ${release_branch}"
@@ -420,7 +423,7 @@ interactive_cherry_pick() {
 			lines+=("$line")
 		done <<< "$commits"
 
-		printf "\n  Commits on main since %s:\n\n" "$release_branch"
+		printf "\n  Commits on %s since %s:\n\n" "$DEFAULT_BRANCH" "$release_branch"
 		for i in "${!lines[@]}"; do
 			printf "    %d) %s\n" "$((i + 1))" "${lines[$i]}"
 		done
@@ -577,7 +580,7 @@ ok "Semver format valid: ${VERSION}"
 # ---------------------------------------------------------------------------
 IFS='.' read -r SV_MAJOR SV_MINOR SV_PATCH <<< "$VERSION"
 RELEASE_MODE="forward"
-PR_BASE="main"
+PR_BASE="$DEFAULT_BRANCH"
 RELEASE_BRANCH=""
 
 git fetch origin --tags --quiet 2>/dev/null || true
@@ -687,12 +690,24 @@ elif git ls-remote --heads origin "$BRANCH" 2>/dev/null | grep -q "$BRANCH"; the
 	RESUME_STATE="pr"
 	info "[resume] Branch ${BRANCH} exists on remote, creating PR..."
 elif git branch --list "$BRANCH" | grep -q "$BRANCH"; then
-	RESUME_STATE="local"
-	git checkout "$BRANCH" --quiet
 	if [[ "$RELEASE_MODE" == "backport" ]]; then
+		RESUME_STATE="local"
+		git checkout "$BRANCH" --quiet
 		info "[resume] Local branch ${BRANCH} found, resuming after cherry-pick..."
 	else
-		info "[resume] Local branch ${BRANCH} found, resuming forward release..."
+		# Forward: resume only a matching clean release tip; otherwise drop stale branch.
+		git checkout "$BRANCH" --quiet
+		if [[ "$(git log -1 --pretty=%s 2>/dev/null)" == "chore(release):"* ]] \
+			&& [[ "$(detect_version)" == "$VERSION" ]] \
+			&& git diff --quiet --ignore-submodules \
+			&& git diff --cached --quiet --ignore-submodules; then
+			RESUME_STATE="local"
+			info "[resume] Local branch ${BRANCH} found, resuming forward release..."
+		else
+			info "[cleanup] Removed stale local branch, starting fresh..."
+			git checkout "$DEFAULT_BRANCH" 2>/dev/null || true
+			git branch -D "$BRANCH" 2>/dev/null || true
+		fi
 	fi
 fi
 
@@ -822,19 +837,19 @@ if [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]]; then
 
 	if [[ "$RELEASE_MODE" == "forward" ]]; then
 		CURRENT_BRANCH=$(git branch --show-current)
-		if [[ "$CURRENT_BRANCH" == "main" ]]; then
-			ok "On branch main"
+		if [[ "$CURRENT_BRANCH" == "$DEFAULT_BRANCH" ]]; then
+			ok "On branch ${DEFAULT_BRANCH}"
 		else
-			fail "Must be on branch main (currently on ${CURRENT_BRANCH})"
+			fail "Must be on branch ${DEFAULT_BRANCH} (currently on ${CURRENT_BRANCH})"
 		fi
 
-		git fetch origin main --quiet
+		git fetch origin "$DEFAULT_BRANCH" --quiet
 		LOCAL_SHA=$(git rev-parse HEAD)
-		REMOTE_SHA=$(git rev-parse origin/main)
+		REMOTE_SHA=$(git rev-parse "origin/${DEFAULT_BRANCH}")
 		if [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
-			ok "main is up to date with origin/main"
+			ok "${DEFAULT_BRANCH} is up to date with origin/${DEFAULT_BRANCH}"
 		else
-			fail "main is not up to date with origin/main (pull or push first)"
+			fail "${DEFAULT_BRANCH} is not up to date with origin/${DEFAULT_BRANCH} (pull or push first)"
 		fi
 	fi
 
