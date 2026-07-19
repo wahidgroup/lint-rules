@@ -16,11 +16,12 @@ if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
 fi
 
 compute_setup_hash() {
-	# Include install mode/flags so e.g. --ignore-scripts vs normal cannot share a stamp.
+	# Include install mode/flags
 	{
 		shasum -a 256 \
 			"$ROOT/package.json" \
 			"$ROOT/package-lock.json" \
+			"$ROOT/scripts/setup.sh" \
 			2>/dev/null
 		printf 'npm-cmd:%s\n' "$NPM_INSTALL_CMD"
 		printf 'npm-flags:%s\n' "${NPM_INSTALL_FLAGS:-}"

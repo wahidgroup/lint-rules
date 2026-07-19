@@ -36,10 +36,12 @@ jobs:
             build
             ci
             chore
+            revert
           requireScope: false
-          subjectPattern: ^.+[^.]$
+          # Lowercase start (not Sentence case); no trailing period - matches commit-msg / commitlint.
+          subjectPattern: ^[a-z0-9].+[^.]$
           subjectPatternError: |
-            Subject MUST NOT end with a period.
+            Description MUST start with a lowercase letter or digit and MUST NOT end with a period.
             Example: "feat(scope): add new feature"
 
   body:

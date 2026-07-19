@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Propagate errexit into command substitutions (see BashFAQ/105).
+shopt -s inherit_errexit
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -24,13 +26,56 @@ next_step() {
 	step "$STEP" "$1"
 }
 
-# Exact remote ref checks (avoid substring matches via grep on ls-remote lines).
+# HTTPS (.../repo.git) and SCP (git@host:org/repo.git or git@host:repo.git).
+project_name_from_remote() {
+	local url=""
+	if [[ -n "${1:-}" ]]; then
+		url="$(git -C "$1" remote get-url origin 2>/dev/null || true)"
+	else
+		url="$(git remote get-url origin 2>/dev/null || true)"
+	fi
+	if [[ -z "$url" ]]; then
+		printf "unknown"
+		return 0
+	fi
+	printf '%s\n' "$url" | sed -e 's/\.git$//' -e 's|.*/||' -e 's|.*:||'
+}
+
+# Exact remote ref checks, fail closed: a network/auth error must abort the
+# run instead of reading as "ref absent".
+# Usage: remote_ref_exists <tags|heads> <full-ref> [repo-dir]
+remote_ref_exists() {
+	local kind="$1"
+	local ref="$2"
+	local dir="${3:-.}"
+	local status=0
+	git -C "$dir" ls-remote --exit-code "--${kind}" origin "$ref" \
+		>/dev/null 2>&1 || status=$?
+	if (( status == 0 )); then
+		return 0
+	fi
+	if (( status == 2 )); then
+		return 1
+	fi
+	fail "Could not query origin for ${ref} (network or auth error)"
+}
+
 remote_tag_exists() {
-	[[ -n "$(git ls-remote --tags origin "refs/tags/${1}" 2>/dev/null)" ]]
+	remote_ref_exists tags "refs/tags/${1}" "${2:-.}"
 }
 
 remote_head_exists() {
-	[[ -n "$(git ls-remote --heads origin "refs/heads/${1}" 2>/dev/null)" ]]
+	remote_ref_exists heads "refs/heads/${1}" "${2:-.}"
+}
+
+require_tty() {
+	if [[ ! -t 0 ]]; then
+		fail "$1 requires an interactive terminal (stdin is not a TTY)"
+	fi
+}
+
+fail_diverged() {
+	fail "Local ${BRANCH} and origin/${BRANCH} have diverged. Update or delete the local branch, then retry."
 }
 
 # ---------------------------------------------------------------------------
@@ -140,17 +185,48 @@ bump_version() {
 	ok "Version updated to ${version}"
 }
 
+# Plain X.Y.Z only; prerelease/build metadata (SemVer 2.0.0 items 9-10) is
+# rejected so arithmetic comparison below cannot silently misread it.
+assert_plain_semver() {
+	if [[ ! "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		fail "Invalid semver format: '${1}'. Expected X.Y.Z (e.g. 0.2.0)"
+	fi
+}
+
 semver_compare() {
-	local IFS=.
-	local -a a=($1) b=($2)
+	local -a a b
+	local i
+	assert_plain_semver "$1"
+	assert_plain_semver "$2"
+	IFS=. read -ra a <<< "$1"
+	IFS=. read -ra b <<< "$2"
 	for i in 0 1 2; do
 		if (( a[i] > b[i] )); then
-			printf "gt"; return
-		elif (( a[i] < b[i] )); then
-			printf "lt"; return
+			printf "gt"
+			return 0
+		fi
+		if (( a[i] < b[i] )); then
+			printf "lt"
+			return 0
 		fi
 	done
 	printf "eq"
+}
+
+working_tree_clean() {
+	git diff --quiet --ignore-submodules \
+		&& git diff --cached --quiet --ignore-submodules
+}
+
+# Version recorded at <ref> (package.json or VERSION); empty if neither.
+version_at_ref() {
+	local ref="$1"
+	if git cat-file -e "${ref}:package.json" 2>/dev/null; then
+		git show "${ref}:package.json" \
+			| node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || true
+	elif git cat-file -e "${ref}:VERSION" 2>/dev/null; then
+		git show "${ref}:VERSION" | tr -d '\n' || true
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -171,7 +247,7 @@ compile_changelog() {
 
 	local changelog_title="## v${VERSION} (${date_str})"
 
-	local components=""
+	local components="" i
 	if [[ -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
 		components=$'\n### Components\n'
 		for i in "${!SUBMODULES[@]}"; do
@@ -197,8 +273,7 @@ compile_changelog() {
 	local merge_subjects
 	merge_subjects=$(git log "${last_tag}..HEAD" --merges --format="%s")
 
-	local labels_file
-	labels_file=$(mktemp)
+	local labels=""
 
 	if [[ -n "$merge_subjects" ]]; then
 		while IFS= read -r subject; do
@@ -225,12 +300,11 @@ compile_changelog() {
 
 			body+="${pr_line}"$'\n'
 
-			echo "$pr_json" | jq -r '.labels[].name' >> "$labels_file"
+			labels+="$(echo "$pr_json" | jq -r '.labels[].name')"$'\n'
 		done <<< "$merge_subjects"
 	fi
 
-	RELEASE_LABELS=$(sort -u "$labels_file" 2>/dev/null || true)
-	rm -f "$labels_file"
+	RELEASE_LABELS=$(printf '%s' "$labels" | sort -u)
 
 	if [[ -n "$body" && -n "$components" ]]; then
 		CHANGELOG="${changelog_title}
@@ -251,7 +325,7 @@ ${body}"
 print_release_notes() {
 	compile_changelog
 	printf "\n"
-	printf "  ${BOLD}Release Notes (v${VERSION})${RESET}\n"
+	printf "  ${BOLD}Release Notes (v%s)${RESET}\n" "$VERSION"
 	printf "  ──────────────────────────────────\n"
 	printf '%s\n' "$CHANGELOG" | while IFS= read -r line; do
 		printf "  %s\n" "$line"
@@ -269,12 +343,17 @@ print_summary() {
 		printf "  ${BOLD}Base:${RESET}      %s\n" "$PR_BASE"
 	fi
 	if [[ -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
+		local i pad
 		for i in "${!SUBMODULES[@]}"; do
 			local submod="${SUBMODULES[$i]}"
 			local label
 			label="$(echo "${submod:0:1}" | tr '[:lower:]' '[:upper:]')${submod:1}"
+			pad=$((10 - ${#label}))
+			if (( pad < 1 )); then
+				pad=1
+			fi
 			printf "  ${BOLD}%s:${RESET}%s%s\n" "$label" \
-				"$(printf '%*s' $((10 - ${#label})) '')" \
+				"$(printf '%*s' "$pad" '')" \
 				"${SUBMODULE_REFS[$i]:-current}"
 		done
 	fi
@@ -285,11 +364,23 @@ poll_pr() {
 	local pr_number="$1"
 	local start_time
 	start_time=$(date +%s)
+	local failures=0
 
 	info "Polling PR #${pr_number} for merge (every 10s)..."
 	while true; do
+		# Tolerate transient gh/network failures instead of dying mid-wait.
 		local state
-		state=$(gh pr view "$pr_number" --json state --jq .state)
+		if state=$(gh pr view "$pr_number" --json state --jq .state 2>/dev/null); then
+			failures=0
+		else
+			failures=$((failures + 1))
+			if (( failures >= 6 )); then
+				fail "Could not read PR #${pr_number} state after ${failures} consecutive attempts (gh or network error)"
+			fi
+			info "Could not read PR #${pr_number} state (attempt ${failures}/6) - retrying in 10s"
+			sleep 10
+			continue
+		fi
 
 		local now elapsed
 		now=$(date +%s)
@@ -326,6 +417,7 @@ ensure_label() {
 
 detect_submodules() {
 	SUBMODULES=()
+	local name
 	if [[ -f .gitmodules ]]; then
 		while IFS= read -r name; do
 			SUBMODULES+=("$name")
@@ -351,7 +443,7 @@ resolve_submodule_ref() {
 
 	if [[ "$ref" == releases/v* ]]; then
 		local yanked_tag="yanked/${ref#releases/}"
-		if [[ -n "$(git -C "$name" ls-remote --tags origin "refs/tags/${yanked_tag}" 2>/dev/null)" ]]; then
+		if remote_tag_exists "$yanked_tag" "$name"; then
 			fail "${name}: version ${ref#releases/} has been yanked"
 		fi
 	fi
@@ -375,6 +467,7 @@ resolve_or_keep() {
 }
 
 resolve_submodules() {
+	local i
 	for i in "${!SUBMODULES[@]}"; do
 		resolve_or_keep "${SUBMODULES[$i]}" "${SUBMODULE_REFS[$i]:-}"
 	done
@@ -382,6 +475,7 @@ resolve_submodules() {
 
 stage_submodules() {
 	local staged=false
+	local i
 
 	for i in "${!SUBMODULES[@]}"; do
 		if [[ -n "${SUBMODULE_REFS[$i]:-}" ]]; then
@@ -409,7 +503,7 @@ ensure_release_branch() {
 
 	git fetch origin --quiet --tags
 
-	if [[ -n "$(git ls-remote --heads origin "refs/heads/${branch}" 2>/dev/null)" ]]; then
+	if remote_head_exists "$branch"; then
 		git checkout "$branch" --quiet
 		git pull origin "$branch" --quiet
 		ok "Release branch ${branch} is up to date"
@@ -437,9 +531,7 @@ ensure_release_branch() {
 			fi
 		done < <(git branch -r --list "origin/release/v${major}.*" --sort=-v:refname 2>/dev/null)
 		if [[ -n "$latest_branch" ]]; then
-			base_tag="${latest_branch#origin/}"
-			git checkout "$base_tag" --quiet
-			git checkout -b "$branch"
+			git checkout -b "$branch" "$latest_branch"
 			git push -u origin "$branch" --quiet
 			ok "Created release branch ${branch} from ${latest_branch}"
 			return
@@ -449,7 +541,7 @@ ensure_release_branch() {
 		local tag_candidate tag_minor
 		while IFS= read -r tag_candidate; do
 			[[ -z "$tag_candidate" ]] && continue
-			tag_minor="${tag_candidate#releases/v${major}.}"
+			tag_minor="${tag_candidate#releases/v"${major}".}"
 			tag_minor="${tag_minor%%.*}"
 			[[ "$tag_minor" =~ ^[0-9]+$ ]] || continue
 			# Never base a new minor line on a higher minor's tag
@@ -490,13 +582,16 @@ interactive_cherry_pick() {
 		info "${count} commits available - consider narrowing your selection"
 	fi
 
-	local selected=""
+	local selected="" line i selection idx
+	local -a indices
 	if command -v fzf &>/dev/null; then
 		selected=$(echo "$commits" \
 			| fzf --multi --reverse \
 				--header "Select commits to cherry-pick (TAB to select, ENTER to confirm)" \
 			|| true)
 	else
+		require_tty "Cherry-pick selection"
+
 		local -a lines=()
 		while IFS= read -r line; do
 			lines+=("$line")
@@ -517,10 +612,14 @@ interactive_cherry_pick() {
 
 		IFS=',' read -ra indices <<< "$selection"
 		for idx in "${indices[@]}"; do
-			idx=$(( ${idx// /} - 1 ))
-			if (( idx >= 0 && idx < ${#lines[@]} )); then
-				selected+="${lines[$idx]}"$'\n'
+			idx="${idx//[[:space:]]/}"
+			if [[ ! "$idx" =~ ^[0-9]+$ ]]; then
+				fail "Invalid selection: '${idx}' (expected numbers like 1,3,5)"
 			fi
+			if (( idx < 1 || idx > ${#lines[@]} )); then
+				fail "Selection out of range: ${idx} (valid: 1-${#lines[@]})"
+			fi
+			selected+="${lines[idx - 1]}"$'\n'
 		done
 	fi
 
@@ -556,6 +655,10 @@ parse_args() {
 
 	local arg matched submod
 	for arg in "$@"; do
+		# Makefile passes an empty version argument when version= is unset.
+		if [[ -z "$arg" ]]; then
+			continue
+		fi
 		if [[ "$arg" == "--dry-run" ]]; then
 			DRY_RUN=true
 		elif [[ "$arg" == "--allow-staged" ]]; then
@@ -576,7 +679,13 @@ parse_args() {
 					fi
 				done
 			fi
-			if [[ "$matched" == false && -z "$VERSION" ]]; then
+			if [[ "$matched" == false ]]; then
+				if [[ "$arg" == --* ]]; then
+					fail "Unknown flag: ${arg}"
+				fi
+				if [[ -n "$VERSION" ]]; then
+					fail "Unexpected argument: '${arg}' (version already set to '${VERSION}')"
+				fi
 				VERSION="$arg"
 			fi
 		fi
@@ -592,8 +701,7 @@ enter_submodule_mode() {
 	if [[ ! -d "$REPO_DIR/.git" && ! -f "$REPO_DIR/.git" ]]; then
 		fail "${REPO_DIR} is not a git repository (run 'make setup' first)"
 	fi
-	PROJECT_NAME="$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null \
-		| sed -e 's|.*/||' -e 's/\.git$//')"
+	PROJECT_NAME="$(project_name_from_remote "$REPO_DIR")"
 	cd "$REPO_DIR"
 	ok "Targeting submodule: ${PROJECT_NAME} ($(pwd))"
 }
@@ -615,10 +723,15 @@ resolve_version_interactive() {
 		return 0
 	fi
 
+	require_tty "Version prompt"
+
 	if [[ "$YANK" == true ]]; then
 		local all_tags release_vers yanked_vers yankable ver
-		all_tags=$(git ls-remote --tags origin 2>/dev/null \
-			| sed -n 's|.*refs/tags/\(.*\)$|\1|p' | grep -v '\^{}')
+		if ! all_tags=$(git ls-remote --tags origin 2>/dev/null); then
+			fail "Could not list tags on origin (network or auth error)"
+		fi
+		all_tags=$(printf '%s\n' "$all_tags" \
+			| sed -n 's|.*refs/tags/\(.*\)$|\1|p' | grep -v '\^{}' || true)
 		release_vers=$(echo "$all_tags" | grep '^releases/v' | sed 's|releases/v||' || true)
 		yanked_vers=$(echo "$all_tags" | grep '^yanked/v' | sed 's|yanked/v||' || true)
 
@@ -648,9 +761,7 @@ resolve_version_interactive() {
 }
 
 validate_semver() {
-	if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-		fail "Invalid semver format: '${VERSION}'. Expected X.Y.Z (e.g. 0.2.0)"
-	fi
+	assert_plain_semver "$VERSION"
 	ok "Semver format valid: ${VERSION}"
 }
 
@@ -660,13 +771,14 @@ detect_release_mode() {
 	PR_BASE="$DEFAULT_BRANCH"
 	RELEASE_BRANCH=""
 
+	local latest_tag latest_ver latest_major latest_minor
 	git fetch origin --tags --quiet 2>/dev/null || true
-	LATEST_TAG=$(git tag --list "releases/v*" --sort=-v:refname | head -1)
-	if [[ -n "$LATEST_TAG" ]]; then
-		LATEST_VER="${LATEST_TAG#releases/v}"
-		IFS='.' read -r LATEST_MAJOR LATEST_MINOR _ <<< "$LATEST_VER"
-		if (( SV_MAJOR < LATEST_MAJOR )) || \
-		   (( SV_MAJOR == LATEST_MAJOR && SV_MINOR < LATEST_MINOR )); then
+	latest_tag=$(git tag --list "releases/v*" --sort=-v:refname | head -1)
+	if [[ -n "$latest_tag" ]]; then
+		latest_ver="${latest_tag#releases/v}"
+		IFS='.' read -r latest_major latest_minor _ <<< "$latest_ver"
+		if (( SV_MAJOR < latest_major )) || \
+		   (( SV_MAJOR == latest_major && SV_MINOR < latest_minor )); then
 			RELEASE_MODE="backport"
 		fi
 	fi
@@ -684,11 +796,37 @@ detect_release_mode() {
 }
 
 require_gh() {
-	if command -v gh &>/dev/null; then
-		ok "gh CLI available"
-	else
+	if ! command -v gh &>/dev/null; then
 		fail "gh CLI is required (https://cli.github.com)"
 	fi
+	# Unauthenticated gh reads as "no PR" in state detection; fail closed here.
+	if ! gh auth status &>/dev/null; then
+		fail "gh CLI is not authenticated (run 'gh auth login')"
+	fi
+	ok "gh CLI available and authenticated"
+}
+
+require_signing_key() {
+	local signing_key sign_format
+	signing_key=$(git config user.signingkey 2>/dev/null || true)
+	if [[ -n "$signing_key" ]]; then
+		sign_format=$(git config gpg.format 2>/dev/null || echo "openpgp")
+		ok "Signing configured (format: ${sign_format})"
+		return 0
+	fi
+	cat >&2 <<-SIGNING
+	
+	  ${RED}No signing key configured.${RESET}
+	
+	  Configure GPG signing:
+	    git config --global user.signingkey <GPG-KEY-ID>
+	
+	  Or configure SSH signing:
+	    git config --global gpg.format ssh
+	    git config --global user.signingkey ~/.ssh/id_ed25519.pub
+	
+	SIGNING
+	fail "Signing key is required for releases"
 }
 
 require_jq() {
@@ -711,10 +849,12 @@ run_yank() {
 
 	if [[ "$DRY_RUN" == true ]]; then
 		info "Would delete GitHub release for ${TAG}"
-		info "Would push marker tag ${YANKED_TAG}"
+		info "Would push signed marker tag ${YANKED_TAG}"
 		info "Dry run complete. No changes were made."
 		exit 0
 	fi
+
+	require_signing_key
 
 	step 1 "Delete GitHub release"
 	if gh release view "$TAG" &>/dev/null; then
@@ -725,15 +865,16 @@ run_yank() {
 	fi
 
 	step 2 "Push yanked marker tag"
-	git tag -a "$YANKED_TAG" \
+	# Signed like release tags: unsigned markers could be forged.
+	git tag -s "$YANKED_TAG" \
 		-m "Yanked by $(git config user.name) on $(date +%Y-%m-%d)"
 	git push origin "$YANKED_TAG"
-	ok "Marker tag ${YANKED_TAG} pushed"
+	ok "Marker tag ${YANKED_TAG} pushed (signed)"
 
 	header "Yank complete!"
 	printf "\n"
 	printf "  ${BOLD}Version:${RESET}  v%s\n" "$VERSION"
-	printf "  ${BOLD}Release:${RESET}  deleted\n"
+	printf "  ${BOLD}Release:${RESET}  %s\n" "deleted"
 	printf "  ${BOLD}Tag:${RESET}      %s (preserved)\n" "$TAG"
 	printf "  ${BOLD}Marker:${RESET}   %s\n" "$YANKED_TAG"
 	printf "\n"
@@ -755,8 +896,10 @@ detect_resume_state() {
 	fi
 
 	local pr_line tip_subject tip_version
-	pr_line=$(gh pr list --head "$BRANCH" --state all --json number,state \
-		--jq '.[0] | "\(.number) \(.state)"' 2>/dev/null || true)
+	if ! pr_line=$(gh pr list --head "$BRANCH" --state all --json number,state \
+		--jq '.[0] | select(. != null) | "\(.number) \(.state)"' 2>/dev/null); then
+		fail "Could not list PRs for ${BRANCH} (gh or network error)"
+	fi
 	if [[ -n "$pr_line" ]]; then
 		read -r PR_NUMBER PR_STATE <<< "$pr_line"
 	fi
@@ -782,18 +925,11 @@ detect_resume_state() {
 		else
 			# Forward: inspect tip without checkout.
 			tip_subject=$(git log -1 --pretty=%s "$BRANCH" 2>/dev/null || true)
-			tip_version=""
-			if git cat-file -e "${BRANCH}:package.json" 2>/dev/null; then
-				tip_version=$(git show "${BRANCH}:package.json" \
-					| node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || true)
-			elif git cat-file -e "${BRANCH}:VERSION" 2>/dev/null; then
-				tip_version=$(git show "${BRANCH}:VERSION" | tr -d '\n' || true)
-			fi
+			tip_version=$(version_at_ref "$BRANCH")
 
 			if [[ "$tip_subject" == "chore(release):"* && "$tip_version" == "$VERSION" ]]; then
 				# Finished release tip: clean tree required to resume.
-				if ! git diff --quiet --ignore-submodules \
-					|| ! git diff --cached --quiet --ignore-submodules; then
+				if ! working_tree_clean; then
 					fail "Working tree has uncommitted changes; clean tree required to resume ${BRANCH}"
 				fi
 				RESUME_STATE="local"
@@ -823,24 +959,39 @@ detect_resume_state() {
 	ok "Release state: ${RESUME_STATE}"
 }
 
-# For pr resume: local HEAD must match origin tip for changelog (ff if behind).
-align_pr_branch_to_origin() {
+# Prints eq|ahead|behind|diverged for local BRANCH vs origin/BRANCH.
+# Both refs must already exist (fetch first).
+branch_sync_state() {
 	local local_sha remote_sha
-	local_sha=$(git rev-parse "$BRANCH")
+	local_sha=$(git rev-parse "refs/heads/${BRANCH}")
 	remote_sha=$(git rev-parse "refs/remotes/origin/${BRANCH}")
 	if [[ "$local_sha" == "$remote_sha" ]]; then
-		return 0
+		printf "eq"
+	elif git merge-base --is-ancestor "$local_sha" "$remote_sha"; then
+		printf "behind"
+	elif git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+		printf "ahead"
+	else
+		printf "diverged"
 	fi
-	if git merge-base --is-ancestor "$local_sha" "$remote_sha"; then
-		git reset --quiet --hard "origin/${BRANCH}"
-		ok "Local ${BRANCH} aligned to origin/${BRANCH}"
-		return 0
-	fi
-	if git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
-		# Strictly ahead: push_and_open_pr will push.
-		return 0
-	fi
-	fail "Local ${BRANCH} and origin/${BRANCH} have diverged. Update or delete the local branch, then retry."
+}
+
+# For pr resume: local HEAD must match origin tip for changelog (ff if behind).
+align_pr_branch_to_origin() {
+	case "$(branch_sync_state)" in
+		eq)
+			;;
+		ahead)
+			# Strictly ahead: push_and_open_pr will push.
+			;;
+		behind)
+			git reset --quiet --hard "origin/${BRANCH}"
+			ok "Local ${BRANCH} aligned to origin/${BRANCH}"
+			;;
+		diverged)
+			fail_diverged
+			;;
+	esac
 }
 
 # Apply workspace mutation required by detected resume state.
@@ -883,8 +1034,7 @@ mark_release_commit_exists() {
 	if [[ "$RESUME_STATE" == "local" ]] \
 		&& [[ "$(git log -1 --pretty=%s 2>/dev/null)" == "chore(release):"* ]] \
 		&& [[ "$(detect_version)" == "$VERSION" ]] \
-		&& git diff --quiet --ignore-submodules \
-		&& git diff --cached --quiet --ignore-submodules; then
+		&& working_tree_clean; then
 		RELEASE_COMMIT_EXISTS=true
 	fi
 }
@@ -929,6 +1079,8 @@ prompt_submodule_refs() {
 	if [[ "$RELEASE_COMMIT_EXISTS" == false ]] \
 		&& [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]] \
 		&& [[ -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
+		require_tty "Submodule ref prompt"
+
 		local prompt_suffix="" ref i
 		if [[ "$RELEASE_MODE" == "backport" ]]; then
 			prompt_suffix=" for backport"
@@ -937,7 +1089,7 @@ prompt_submodule_refs() {
 			printf "\n  Enter %s tag or commit hash%s (Enter to keep current): " \
 				"${SUBMODULES[$i]}" "$prompt_suffix"
 			read -r ref
-			SUBMODULE_REFS[$i]="$ref"
+			SUBMODULE_REFS[i]="$ref"
 		done
 	fi
 }
@@ -955,26 +1107,7 @@ validate_preconditions() {
 		fail "Tag ${TAG} already exists"
 	fi
 
-	local signing_key sign_format
-	signing_key=$(git config user.signingkey 2>/dev/null || true)
-	if [[ -n "$signing_key" ]]; then
-		sign_format=$(git config gpg.format 2>/dev/null || echo "openpgp")
-		ok "Signing configured (format: ${sign_format})"
-	else
-		cat >&2 <<-SIGNING
-		
-		  ${RED}No signing key configured.${RESET}
-		
-		  Configure GPG signing:
-		    git config --global user.signingkey <GPG-KEY-ID>
-		
-		  Or configure SSH signing:
-		    git config --global gpg.format ssh
-		    git config --global user.signingkey ~/.ssh/id_ed25519.pub
-		
-		SIGNING
-		fail "Signing key is required for releases"
-	fi
+	require_signing_key
 
 	if ! git diff --quiet --ignore-submodules; then
 		fail "Working tree has unstaged changes (excluding submodules)"
@@ -1100,19 +1233,21 @@ push_and_open_pr() {
 		&& git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
 		# Push only when local is strictly ahead.
 		git fetch origin "$BRANCH" --quiet
-		local local_sha remote_sha
-		local_sha=$(git rev-parse "$BRANCH")
-		remote_sha=$(git rev-parse "refs/remotes/origin/${BRANCH}")
-		if [[ "$local_sha" == "$remote_sha" ]]; then
-			ok "Local ${BRANCH} already matches origin"
-		elif git merge-base --is-ancestor "$local_sha" "$remote_sha"; then
-			info "Local ${BRANCH} is behind origin - skipping push"
-		elif git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
-			git push origin "$BRANCH"
-			ok "Local ${BRANCH} pushed to origin"
-		else
-			fail "Local ${BRANCH} and origin/${BRANCH} have diverged. Update or delete the local branch, then retry."
-		fi
+		case "$(branch_sync_state)" in
+			eq)
+				ok "Local ${BRANCH} already matches origin"
+				;;
+			behind)
+				info "Local ${BRANCH} is behind origin - skipping push"
+				;;
+			ahead)
+				git push origin "$BRANCH"
+				ok "Local ${BRANCH} pushed to origin"
+				;;
+			diverged)
+				fail_diverged
+				;;
+		esac
 	fi
 
 	compile_changelog
@@ -1121,7 +1256,10 @@ push_and_open_pr() {
 
 	# Only apply labels that already exist in the repo (plus 'release')
 	local existing_labels label
-	existing_labels=$(gh label list --limit 200 --json name --jq '.[].name' 2>/dev/null || true)
+	if ! existing_labels=$(gh label list --limit 200 --json name \
+		--jq '.[].name' 2>/dev/null); then
+		fail "Could not list repo labels (gh or network error)"
+	fi
 
 	local -a pr_labels=()
 	while IFS= read -r label; do
@@ -1143,8 +1281,10 @@ push_and_open_pr() {
 	done
 
 	local pr_url existing_pr
-	existing_pr=$(gh pr list --head "$BRANCH" --state open --json number,url \
-		--jq '.[0] | select(.number != null) | "\(.number) \(.url)"' 2>/dev/null || true)
+	if ! existing_pr=$(gh pr list --head "$BRANCH" --state open --json number,url \
+		--jq '.[0] | select(.number != null) | "\(.number) \(.url)"' 2>/dev/null); then
+		fail "Could not list open PRs for ${BRANCH} (gh or network error)"
+	fi
 	if [[ -n "$existing_pr" ]]; then
 		read -r PR_NUMBER pr_url <<< "$existing_pr"
 		local -a pr_edit_args=(
@@ -1182,7 +1322,7 @@ return_and_tag() {
 		# Rebuild notes from updated PR_BASE (do not reuse pre-merge CHANGELOG).
 		CHANGELOG=""
 		compile_changelog
-		git tag -s -a "$TAG" -m "$CHANGELOG"
+		git tag -s "$TAG" -m "$CHANGELOG"
 		ok "Tag ${TAG} created (signed)"
 	fi
 
@@ -1196,8 +1336,7 @@ return_and_tag() {
 # ---------------------------------------------------------------------------
 
 main() {
-	PROJECT_NAME="$(git remote get-url origin 2>/dev/null \
-		| sed -e 's|.*/||' -e 's/\.git$//' || echo 'unknown')"
+	PROJECT_NAME="$(project_name_from_remote)"
 
 	detect_submodules
 	parse_args "$@"
