@@ -803,10 +803,18 @@ detect_resume_state() {
 				# Wrong-version release tip: fail closed (do not auto-delete).
 				fail "Local branch ${BRANCH} tip is chore(release) for v${tip_version:-unknown}, not v${VERSION}. Delete it (git branch -D ${BRANCH}) or finish that release, then retry."
 			else
-				# In-progress process branch (no release commit yet): continue.
-				RESUME_STATE="local"
-				RESUME_NEEDS_CHECKOUT=true
-				info "[resume] Local branch ${BRANCH} found (in progress), resuming forward release..."
+				# No release commit yet: only resume if tip still equals origin/DEFAULT_BRANCH.
+				local tip_sha base_sha
+				git fetch origin "$DEFAULT_BRANCH" --quiet
+				tip_sha=$(git rev-parse "$BRANCH")
+				base_sha=$(git rev-parse "origin/${DEFAULT_BRANCH}")
+				if [[ "$tip_sha" == "$base_sha" ]]; then
+					RESUME_STATE="local"
+					RESUME_NEEDS_CHECKOUT=true
+					info "[resume] Local branch ${BRANCH} found at origin/${DEFAULT_BRANCH}, resuming forward release..."
+				else
+					fail "Local branch ${BRANCH} tip is not on origin/${DEFAULT_BRANCH} (abandoned or dirty process branch). Delete it (git branch -D ${BRANCH}) and retry from ${DEFAULT_BRANCH}."
+				fi
 			fi
 		fi
 	fi
