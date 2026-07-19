@@ -11,21 +11,27 @@ fi
 remote="$1"
 z40=0000000000000000000000000000000000000000
 
-# Update: remote_oid..local_oid (git sample).
-# New ref: only commits not already on remote main.
+# Update: remote_oid..local_oid.
+# New ref: only commits not already on remote default (HEAD/main/master).
 while read local_ref local_oid remote_ref remote_oid; do
 	if [ "$local_oid" = "$z40" ]; then
 		continue
 	fi
 
 	if [ "$remote_oid" = "$z40" ]; then
-		range="$local_oid"
+		range=""
 		for base in "refs/remotes/$remote/HEAD" "refs/remotes/$remote/main" "refs/remotes/$remote/master"; do
 			if git rev-parse --verify "$base" >/dev/null 2>&1; then
 				range="$base..$local_oid"
 				break
 			fi
 		done
+		if [ -z "$range" ]; then
+			echo "ERROR: No local tracking ref for $remote default branch (HEAD/main/master)."
+			echo "       Run: git fetch $remote"
+			echo "       Cannot determine which commits are new without a base."
+			exit 1
+		fi
 	else
 		range="$remote_oid..$local_oid"
 	fi
