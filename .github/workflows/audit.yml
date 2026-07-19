@@ -17,7 +17,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   audit:
@@ -30,10 +29,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-
-      - name: Configure GitHub Packages Auth
-        run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
 
       - name: Setup
         run: make setup NPM_INSTALL_FLAGS=--ignore-scripts

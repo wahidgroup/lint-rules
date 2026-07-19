@@ -27,10 +27,6 @@ jobs:
           scope: ${{ steps.pkg.outputs.scope }}
           package-manager-cache: false
 
-      - name: Configure GitHub Packages Auth
-        run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
-
       - name: Install dependencies
         run: make setup
 
