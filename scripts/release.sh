@@ -815,6 +815,26 @@ detect_resume_state() {
 	ok "Release state: ${RESUME_STATE}"
 }
 
+# For pr resume: local HEAD must match origin tip for changelog (ff if behind).
+align_pr_branch_to_origin() {
+	local local_sha remote_sha
+	local_sha=$(git rev-parse "$BRANCH")
+	remote_sha=$(git rev-parse "refs/remotes/origin/${BRANCH}")
+	if [[ "$local_sha" == "$remote_sha" ]]; then
+		return 0
+	fi
+	if git merge-base --is-ancestor "$local_sha" "$remote_sha"; then
+		git reset --quiet --hard "origin/${BRANCH}"
+		ok "Local ${BRANCH} aligned to origin/${BRANCH}"
+		return 0
+	fi
+	if git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+		# Strictly ahead: push_and_open_pr will push.
+		return 0
+	fi
+	fail "Local ${BRANCH} and origin/${BRANCH} have diverged. Update or delete the local branch, then retry."
+}
+
 # Apply workspace mutation required by detected resume state.
 enter_resume_workspace() {
 	if [[ "${RESUME_NEEDS_CHECKOUT}" != true ]]; then
@@ -833,6 +853,9 @@ enter_resume_workspace() {
 	if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
 		if ! git checkout "$BRANCH" --quiet; then
 			fail "Could not checkout ${BRANCH} to resume release"
+		fi
+		if [[ "$RESUME_STATE" == "pr" ]]; then
+			align_pr_branch_to_origin
 		fi
 		return 0
 	fi
@@ -1089,8 +1112,16 @@ push_and_open_pr() {
 	ensure_label "release"
 
 	# Only apply labels that already exist in the repo (plus 'release')
-	local existing_labels
+	local existing_labels label
 	existing_labels=$(gh label list --limit 200 --json name --jq '.[].name' 2>/dev/null || true)
+
+	local -a pr_labels=()
+	while IFS= read -r label; do
+		[[ -z "$label" ]] && continue
+		if [[ "$label" == "release" ]] || printf '%s\n' "$existing_labels" | grep -qxF "$label"; then
+			pr_labels+=("$label")
+		fi
+	done < <({ printf 'release\n'; printf '%s\n' "${RELEASE_LABELS:-}"; } | sort -u)
 
 	local -a pr_create_args=(
 		--title "chore(release): v${VERSION}"
@@ -1099,20 +1130,23 @@ push_and_open_pr() {
 		--head "$BRANCH"
 		--assignee "@me"
 	)
-	local label
-	while IFS= read -r label; do
-		[[ -z "$label" ]] && continue
-		if [[ "$label" == "release" ]] || printf '%s\n' "$existing_labels" | grep -qxF "$label"; then
-			pr_create_args+=(--label "$label")
-		fi
-	done < <({ printf 'release\n'; printf '%s\n' "${RELEASE_LABELS:-}"; } | sort -u)
+	for label in "${pr_labels[@]}"; do
+		pr_create_args+=(--label "$label")
+	done
 
 	local pr_url existing_pr
 	existing_pr=$(gh pr list --head "$BRANCH" --state open --json number,url \
 		--jq '.[0] | select(.number != null) | "\(.number) \(.url)"' 2>/dev/null || true)
 	if [[ -n "$existing_pr" ]]; then
 		read -r PR_NUMBER pr_url <<< "$existing_pr"
-		gh pr edit "$PR_NUMBER" --title "chore(release): v${VERSION}" --body "$CHANGELOG" >/dev/null
+		local -a pr_edit_args=(
+			--title "chore(release): v${VERSION}"
+			--body "$CHANGELOG"
+		)
+		for label in "${pr_labels[@]}"; do
+			pr_edit_args+=(--add-label "$label")
+		done
+		gh pr edit "$PR_NUMBER" "${pr_edit_args[@]}" >/dev/null
 		ok "PR #${PR_NUMBER} already open: ${pr_url}"
 	else
 		pr_url=$(gh pr create "${pr_create_args[@]}")
