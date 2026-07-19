@@ -15,16 +15,27 @@ if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
 	NPM_INSTALL_CMD=ci
 fi
 
+# sha256sum (Linux) or shasum (macOS); both print "hash  path".
+if command -v sha256sum >/dev/null 2>&1; then
+	SHA256_CMD=(sha256sum)
+elif command -v shasum >/dev/null 2>&1; then
+	SHA256_CMD=(shasum -a 256)
+else
+	echo "ERROR: setup needs sha256sum or shasum on PATH." >&2
+	exit 1
+fi
+
 compute_setup_hash() {
-	# Include install mode/flags so e.g. --ignore-scripts vs normal cannot share a stamp.
+	# Include install mode/flags
 	{
-		shasum -a 256 \
+		"${SHA256_CMD[@]}" \
 			"$ROOT/package.json" \
 			"$ROOT/package-lock.json" \
+			"$ROOT/scripts/setup.sh" \
 			2>/dev/null
 		printf 'npm-cmd:%s\n' "$NPM_INSTALL_CMD"
 		printf 'npm-flags:%s\n' "${NPM_INSTALL_FLAGS:-}"
-	} | shasum -a 256 | awk '{ print $1 }'
+	} | "${SHA256_CMD[@]}" | awk '{ print $1 }'
 }
 
 setup_required() {
@@ -64,7 +75,7 @@ acquire_lock() {
 			echo "ERROR: timed out waiting for setup lock (${LOCK_FILE})." >&2
 			exit 1
 		fi
-		LOCK_KIND=flock
+		LOCK_KIND="flock"
 		return
 	fi
 
@@ -77,7 +88,7 @@ acquire_lock() {
 		sleep 1
 		waited=$((waited + 1))
 	done
-	LOCK_KIND=mkdir
+	LOCK_KIND="mkdir"
 }
 
 main() {

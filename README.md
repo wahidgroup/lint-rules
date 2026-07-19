@@ -16,7 +16,7 @@ npm install --save-dev @wahidgroup/lint-rules
 ```
 
 **Required peers:** `eslint` (>=9), `typescript` (>=5).  
-**Optional peer:** `prettier` (>=3) — only if you use the Prettier export.
+**Optional peer:** `prettier` (>=3) - only if you use the Prettier export.
 
 Framework exports need matching **optional peers** (not installed by default). Ranges allow compatible minors; this repo pins the tested floors in `devDependencies`:
 
