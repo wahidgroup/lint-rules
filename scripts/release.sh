@@ -705,11 +705,15 @@ elif git branch --list "$BRANCH" | grep -q "$BRANCH"; then
 			tip_version=$(git show "${BRANCH}:VERSION" | tr -d '\n' || true)
 		fi
 
-		if [[ "$tip_subject" == "chore(release):"* ]] \
-			&& [[ "$tip_version" == "$VERSION" ]] \
-			&& git diff --quiet --ignore-submodules \
-			&& git diff --cached --quiet --ignore-submodules \
-			&& git checkout "$BRANCH" --quiet; then
+		# Matching tip + dirty tree must fail (not delete).
+		if [[ "$tip_subject" == "chore(release):"* && "$tip_version" == "$VERSION" ]]; then
+			if ! git diff --quiet --ignore-submodules \
+				|| ! git diff --cached --quiet --ignore-submodules; then
+				fail "Working tree has uncommitted changes; clean tree required to resume ${BRANCH}"
+			fi
+			if ! git checkout "$BRANCH" --quiet; then
+				fail "Could not checkout ${BRANCH} to resume release"
+			fi
 			RESUME_STATE="local"
 			info "[resume] Local branch ${BRANCH} found, resuming forward release..."
 		else
