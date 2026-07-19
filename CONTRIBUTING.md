@@ -16,7 +16,7 @@ Use `make help` for the full command list. Apply fixes with `make lint fix=1`.
 
 Husky hooks:
 
-- `commit-msg` - header MUST follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) (aligned with [`@commitlint/config-conventional`](https://github.com/conventional-changelog/commitlint/tree/master/%40commitlint/config-conventional)): lowercase type/scope, description not Sentence case, no trailing period, max 100 characters. Allowed types match the table below.
+- `commit-msg` - enforces the commit header format (see [Title](#title))
 - `pre-push` - runs `make lint` and verifies commit signatures. Commits MUST be signed before push.
 
 ### Code Style
@@ -33,7 +33,7 @@ All pull requests MUST conform to the title, body, and metadata specifications b
 
 ### Title
 
-PR titles and commit headers MUST follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) (same rules as the `commit-msg` hook / commitlint conventional config):
+PR titles and commit headers MUST follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
 
 ```
 <type>[optional scope][!]: <description>
