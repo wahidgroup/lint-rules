@@ -1,7 +1,11 @@
 #!/usr/bin/env sh
 set -e
 
-make lint || exit 1
+# Husky invokes this via `sh -e` (.husky/_/h)
+if ! make lint </dev/null; then
+	echo "ERROR: make lint failed; push aborted."
+	exit 1
+fi
 
 remote="$1"
 
