@@ -7,6 +7,51 @@ if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )
 fi
 
 # ---------------------------------------------------------------------------
+# release.sh - guided, resumable release automation for GitHub repositories
+#
+# SYNOPSIS
+#	scripts/release.sh [version] [--dry-run] [--allow-staged] [--yank]
+#	                   [--<submodule>]
+#	make release [version=vX.Y.Z]
+#
+# DESCRIPTION
+#	Drives a release from version bump to signed tag as a finite state
+#	machine. Each run detects how far a previous run progressed and
+#	continues from that point, so an interrupted release is re-run with
+#	the same command:
+#
+#	  entry states:  fresh | local | pr | poll | tag
+#	  phases:        prepare -> push_pr -> wait_merge -> tag_push -> done
+#
+#	Forward releases cut process/v<version> from main. Versions older
+#	than the latest tag become backports and cut from the matching
+#	release/vX.Y branch (created on demand, commits cherry-picked).
+#	Release notes are compiled from merged PR titles and labels. Release
+#	and yank marker tags are signed (GPG or SSH).
+#
+# OPTIONS
+#	version         Release version, X.Y.Z or vX.Y.Z. Prompted if absent.
+#	--dry-run       Preview every action. No workspace mutation.
+#	--allow-staged  Include already-staged changes in the release commit.
+#	--yank          Yank a published release: delete the GitHub release,
+#	                push signed yanked/v* marker. Release tag preserved.
+#	--<submodule>   Run against the named submodule from .gitmodules
+#	                (at most one).
+#
+# EXIT STATUS
+#	0  Release complete (or already complete), yank complete, or dry run.
+#	1  Precondition, validation, network, or tooling failure.
+#
+# DEPENDENCIES
+#	bash 3.2+ (extra hardening on 4.4+), git, gh (authenticated), jq,
+#	node (when version source is package.json), fzf (optional picker).
+#
+# ATTRIBUTION
+#	Tanveer Wahid <tan@wahid.email> - canonical version of this script:
+#	https://gist.github.com/sephynox/be7d7f742bea7738b74a3ad723eac165
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 DEFAULT_BRANCH="main"
@@ -52,6 +97,7 @@ remote_ref_exists() {
 	local ref="$2"
 	local dir="${3:-.}"
 	local status=0
+
 	git -C "$dir" ls-remote --exit-code "--${kind}" origin "$ref" \
 		>/dev/null 2>&1 || status=$?
 	if (( status == 0 )); then
@@ -87,7 +133,8 @@ fail_diverged() {
 # Resume states (entry): fresh | local | pr | poll | tag
 # Phases (pipeline):     prepare -> push_pr -> wait_merge -> tag_push -> done
 #
-# Entry maps to first phase; each phase advances via fsm_next_phase.
+# Entry maps to first phase.
+# Each phase advances via fsm_next_phase.
 # ---------------------------------------------------------------------------
 
 fsm_assert_resume_state() {
@@ -708,6 +755,7 @@ enter_submodule_mode() {
 	if [[ ! -d "$REPO_DIR/.git" && ! -f "$REPO_DIR/.git" ]]; then
 		fail "${REPO_DIR} is not a git repository (run 'make setup' first)"
 	fi
+
 	PROJECT_NAME="$(project_name_from_remote "$REPO_DIR")"
 	cd "$REPO_DIR"
 	ok "Targeting submodule: ${PROJECT_NAME} ($(pwd))"
@@ -1001,30 +1049,54 @@ align_pr_branch_to_origin() {
 	esac
 }
 
+# Dry run must not checkout or reset anything.
+resolve_dry_run_notes_ref() {
+	local ref=""
+	case "$RESUME_STATE" in
+		fresh)
+			return 0
+			;;
+		local)
+			git fetch origin "$BRANCH" --quiet 2>/dev/null || true
+			if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+				ref="refs/heads/${BRANCH}"
+			elif git rev-parse --verify "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
+				ref="refs/remotes/origin/${BRANCH}"
+			fi
+			;;
+		pr|poll)
+			git fetch origin "$BRANCH" --quiet 2>/dev/null || true
+			if git rev-parse --verify "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
+				ref="refs/remotes/origin/${BRANCH}"
+			elif git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+				ref="refs/heads/${BRANCH}"
+			fi
+			;;
+		tag)
+			git fetch origin "$PR_BASE" --quiet 2>/dev/null || true
+			if git rev-parse --verify "refs/remotes/origin/${PR_BASE}" >/dev/null 2>&1; then
+				ref="refs/remotes/origin/${PR_BASE}"
+			fi
+			;;
+	esac
+	if [[ -z "$ref" ]]; then
+		fail "Could not resolve a ref for dry run notes preview (state: ${RESUME_STATE})"
+	fi
+	NOTES_REF="$ref"
+	info "Dry run: no checkout (notes preview uses ${NOTES_REF})"
+}
+
 # Apply workspace mutation required by detected resume state.
 # Sets NOTES_REF: the ref release-note previews read history from.
 enter_resume_workspace() {
 	NOTES_REF="HEAD"
 
-	if [[ "${RESUME_NEEDS_CHECKOUT}" != true ]]; then
+	if [[ "$DRY_RUN" == true ]]; then
+		resolve_dry_run_notes_ref
 		return 0
 	fi
 
-	# Dry run must not checkout or reset anything; preview reads the branch
-	# ref directly instead (fetch only updates remote-tracking refs).
-	if [[ "$DRY_RUN" == true ]]; then
-		git fetch origin "$BRANCH" --quiet 2>/dev/null || true
-		if [[ "$RESUME_STATE" == "pr" ]] \
-			&& git rev-parse --verify "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
-			NOTES_REF="refs/remotes/origin/${BRANCH}"
-		elif git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-			NOTES_REF="refs/heads/${BRANCH}"
-		elif git rev-parse --verify "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
-			NOTES_REF="refs/remotes/origin/${BRANCH}"
-		else
-			fail "Could not resolve ${BRANCH} for dry run preview (no local or origin ref)"
-		fi
-		info "Dry run: skipping checkout of ${BRANCH} (notes preview uses ${NOTES_REF})"
+	if [[ "${RESUME_NEEDS_CHECKOUT}" != true ]]; then
 		return 0
 	fi
 
@@ -1071,7 +1143,7 @@ mark_release_commit_exists() {
 assert_version_bump_ok() {
 	local cmp line_tag line_ver
 
-	if [[ "$RESUME_STATE" == "fresh" && "$RELEASE_MODE" == "forward" && -n "$CURRENT_VERSION" ]]; then
+	if [[ ( "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ) && "$RELEASE_MODE" == "forward" && -n "$CURRENT_VERSION" ]]; then
 		cmp=$(semver_compare "$VERSION" "$CURRENT_VERSION")
 		if [[ "$cmp" == "eq" ]]; then
 			if remote_tag_exists "$TAG"; then
@@ -1244,6 +1316,7 @@ prepare_release_work() {
 				stage_submodules
 			fi
 		fi
+
 		bump_version "$VERSION"
 
 		next_step "Preview release notes"
