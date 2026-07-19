@@ -21,10 +21,6 @@ endif
 
 AUDIT_MODE := $(LINT_MODE)
 
-ifneq ($(filter 1,$(debug)),)
-export LOG_LEVEL = debug
-endif
-
 RELEASE_FLAGS :=
 ifneq ($(filter 1,$(dry-run)),)
 RELEASE_FLAGS += --dry-run
@@ -34,6 +30,12 @@ RELEASE_FLAGS += --allow-staged
 endif
 ifneq ($(filter 1,$(yank)),)
 RELEASE_FLAGS += --yank
+endif
+
+# Prefer version= (veneer); accept VERSION= for back-compat
+RELEASE_VERSION := $(version)
+ifeq ($(strip $(RELEASE_VERSION)),)
+RELEASE_VERSION := $(VERSION)
 endif
 
 ifdef CI
@@ -47,7 +49,7 @@ help:
 
 help-body:
 	@printf 'USAGE:\n'
-	@printf '    make <target> [fix=1] [debug=1] [version=vX.Y.Z] [dry-run=1] [allow-staged=1] [yank=1]\n\n'
+	@printf '    make <target> [fix=1] [version=vX.Y.Z] [dry-run=1] [allow-staged=1] [yank=1]\n\n'
 	@printf 'DESCRIPTION:\n'
 	@printf '    Build, lint, and release %s following POSIX/GNU CLI conventions.\n\n' '$(PROJECT)'
 	@printf 'TARGETS:\n'
@@ -66,8 +68,7 @@ help-body:
 	@printf '    clean        Remove artifacts and node_modules\n\n'
 	@printf 'OPTIONS / VARIABLES:\n'
 	@printf '    fix                If set (e.g., fix=1), apply lint/audit fixes\n'
-	@printf '    debug              If set (e.g., debug=1), enable debug logs\n'
-	@printf '    version            Release version (e.g., version=v0.1.0)\n'
+	@printf '    version            Release version (e.g., version=v0.1.0; VERSION= also accepted)\n'
 	@printf '    dry-run            If set (e.g., dry-run=1), preview release without changes\n'
 	@printf '    allow-staged       If set (e.g., allow-staged=1), include staged files in release\n'
 	@printf '    yank               If set (e.g., yank=1), yank a published version\n'
@@ -141,7 +142,7 @@ ci:
 	$(MAKE) pack
 
 release: setup
-	@./scripts/release.sh "$(version)" $(RELEASE_FLAGS)
+	@./scripts/release.sh "$(RELEASE_VERSION)" $(RELEASE_FLAGS)
 
 clean:
 	rm -rf node_modules sbom.json .make

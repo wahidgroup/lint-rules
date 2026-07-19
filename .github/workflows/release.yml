@@ -31,7 +31,7 @@ jobs:
         run: make setup
 
       - name: CI
-        run: make ci ${{ runner.debug == '1' && 'debug=1' || '' }}
+        run: make ci
 
       - name: Verify version matches tag
         run: |
