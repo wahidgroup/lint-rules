@@ -44,14 +44,14 @@ The type MUST be one of:
 | ---------- | ------------------------------------------------------- | ------ |
 | `feat`     | New feature                                             | MINOR  |
 | `fix`      | Bug fix                                                 | PATCH  |
-| `docs`     | Documentation only                                      | —      |
-| `style`    | Formatting, whitespace, no logic change                 | —      |
-| `refactor` | Code change that neither fixes a bug nor adds a feature | —      |
+| `docs`     | Documentation only                                      | -      |
+| `style`    | Formatting, whitespace, no logic change                 | -      |
+| `refactor` | Code change that neither fixes a bug nor adds a feature | -      |
 | `perf`     | Performance improvement                                 | PATCH  |
-| `test`     | Adding or correcting tests                              | —      |
-| `build`    | Build system or dependency changes                      | —      |
-| `ci`       | CI configuration changes                                | —      |
-| `chore`    | Maintenance, no production code change                  | —      |
+| `test`     | Adding or correcting tests                              | -      |
+| `build`    | Build system or dependency changes                      | -      |
+| `ci`       | CI configuration changes                                | -      |
+| `chore`    | Maintenance, no production code change                  | -      |
 
 #### Scope
 
