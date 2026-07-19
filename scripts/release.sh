@@ -704,8 +704,8 @@ RELEASE_COMMIT_EXISTS=false
 if [[ "$RESUME_STATE" == "local" ]] \
 	&& [[ "$(git log -1 --pretty=%s 2>/dev/null)" == "chore(release):"* ]] \
 	&& [[ "$(detect_version)" == "$VERSION" ]] \
-	&& git diff --quiet \
-	&& git diff --cached --quiet; then
+	&& git diff --quiet --ignore-submodules \
+	&& git diff --cached --quiet --ignore-submodules; then
 	RELEASE_COMMIT_EXISTS=true
 fi
 
