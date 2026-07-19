@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Propagate errexit into command substitutions (see BashFAQ/105).
-shopt -s inherit_errexit
+# Bash 4.4+ only. Older shells (macOS default 3.2) keep default behavior.
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+	shopt -s inherit_errexit
+fi
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1000,6 +1003,12 @@ enter_resume_workspace() {
 		return 0
 	fi
 
+	# Dry run must not checkout or reset anything.
+	if [[ "$DRY_RUN" == true ]]; then
+		info "Dry run: skipping checkout of ${BRANCH} (notes preview uses current HEAD)"
+		return 0
+	fi
+
 	# pr resume needs origin tip; local resume may work offline from local ref.
 	if [[ "$RESUME_STATE" == "pr" ]]; then
 		if ! git fetch origin "$BRANCH" --quiet; then
@@ -1201,11 +1210,17 @@ prepare_release_work() {
 	if [[ "$RELEASE_COMMIT_EXISTS" == true ]]; then
 		info "Release commit already present; skipping version bump and commit"
 	else
-		if [[ "$RELEASE_MODE" == "backport" && -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
-			header "Resolving submodules..."
-			resolve_submodules
-			next_step "Update submodule pointers"
-			stage_submodules
+		if [[ -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
+			if [[ "$RELEASE_MODE" == "backport" ]]; then
+				header "Resolving submodules..."
+				resolve_submodules
+				next_step "Update submodule pointers"
+				stage_submodules
+			elif [[ "$RESUME_STATE" == "local" ]]; then
+				# Forward local resume: pointers resolved during validation.
+				next_step "Update submodule pointers"
+				stage_submodules
+			fi
 		fi
 		bump_version "$VERSION"
 
