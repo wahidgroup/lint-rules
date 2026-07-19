@@ -98,7 +98,7 @@ version:
 
 setup:
 	@chmod +x scripts/setup.sh
-	@./scripts/setup.sh
+	@NPM_INSTALL_FLAGS="$(NPM_INSTALL_FLAGS)" ./scripts/setup.sh
 
 lint: setup
 	@echo "Running linters (mode: $(LINT_MODE))..."
