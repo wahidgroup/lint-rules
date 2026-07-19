@@ -9,16 +9,19 @@ Contributors MUST have Node.js (>=24), Git, and Make.
 ```bash
 make setup
 make lint
+make ci
 ```
 
 Use `make help` for the full command list. Apply fixes with `make lint fix=1`.
+
+A Husky `pre-push` hook runs `make lint` and verifies commit signatures. Commits MUST be signed before push.
 
 ### Code Style
 
 Contributors MUST:
 
 - Use hard tabs (enforced by EditorConfig / Prettier)
-- Pass `make lint` before opening a PR
+- Pass `make lint` (and preferably `make ci`) before opening a PR
 - Keep framework-specific ESLint plugins as **optional peerDependencies** when adding a new export (do not add them to `dependencies`)
 
 ## Pull Requests
@@ -109,3 +112,13 @@ Each PR MUST have:
 - The Summary MUST explain _why_; the diff already shows _what_
 - Use `Fixes #N` / `Closes #N` to auto-close linked issues on merge
 - Apply GitHub labels for additional categorization (orthogonal to the type prefix)
+
+## Releasing
+
+Maintainers release with:
+
+```bash
+make release version=vX.Y.Z
+```
+
+Use `dry-run=1`, `allow-staged=1`, or `yank=1` as documented in `make help`.

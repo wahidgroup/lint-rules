@@ -1,1 +1,9 @@
+# Dependencies
 node_modules/
+
+# Generated artifacts
+sbom.json
+*.tgz
+
+# Make
+.make/
