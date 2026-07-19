@@ -687,14 +687,12 @@ elif git ls-remote --heads origin "$BRANCH" 2>/dev/null | grep -q "$BRANCH"; the
 	RESUME_STATE="pr"
 	info "[resume] Branch ${BRANCH} exists on remote, creating PR..."
 elif git branch --list "$BRANCH" | grep -q "$BRANCH"; then
+	RESUME_STATE="local"
+	git checkout "$BRANCH" --quiet
 	if [[ "$RELEASE_MODE" == "backport" ]]; then
-		RESUME_STATE="local"
-		git checkout "$BRANCH" --quiet
 		info "[resume] Local branch ${BRANCH} found, resuming after cherry-pick..."
 	else
-		info "[cleanup] Removed stale local branch, starting fresh..."
-		git checkout main 2>/dev/null || true
-		git branch -D "$BRANCH" 2>/dev/null || true
+		info "[resume] Local branch ${BRANCH} found, resuming forward release..."
 	fi
 fi
 
