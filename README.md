@@ -223,21 +223,21 @@ make lint              # Format check, ESLint, spellcheck
 make lint fix=1        # Auto-fix format + ESLint
 make spellcheck        # CSpell only
 make smoke             # Import every public export
+make pack              # Assert npm pack matches files (+ SBOM)
+make sbom              # Generate CycloneDX SBOM
 make audit             # Security audit
 make audit fix=1       # npm audit fix
-make ci                # lint + smoke
-make clean             # Remove node_modules
+make ci                # lint + smoke + pack
+make clean             # Remove artifacts + node_modules
 ```
 
 ## Releasing
 
-Initial publish (`0.1.0`) to **GitHub Packages** (`npm.pkg.github.com`) via `GITHUB_TOKEN`.
-
-Includes: base + stylistic ESLint house rules, `eslint/strict` typed-lint export, React hooks flat recommended, NestJS/Playwright presets, optional framework peers, stricter tsconfig flags.
+Publish to **GitHub Packages** (`npm.pkg.github.com`) via `GITHUB_TOKEN`. Tag `releases/v*` runs CI, publishes, and attaches `sbom.json` to the GitHub Release.
 
 ```bash
-make release VERSION=v0.1.0                  # Full release workflow
-make release VERSION=v0.1.0 dry-run=1        # Preview without changes
-make release VERSION=v0.1.0 allow-staged=1   # Include staged files
+make release version=v0.1.0                  # Full release workflow
+make release version=v0.1.0 dry-run=1        # Preview without changes
+make release version=v0.1.0 allow-staged=1   # Include staged files
 make release yank=1                          # Yank a published version
 ```

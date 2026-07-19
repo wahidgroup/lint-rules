@@ -338,7 +338,7 @@ ensure_release_branch() {
 	if (( patch > 0 )); then
 		base_tag="releases/v${major}.${minor}.0"
 		if ! git rev-parse --verify "${base_tag}^{commit}" &>/dev/null; then
-			fail "Base tag ${base_tag} not found — release v${major}.${minor}.0 first"
+			fail "Base tag ${base_tag} not found - release v${major}.${minor}.0 first"
 		fi
 	else
 		local latest_branch=""
@@ -405,7 +405,7 @@ interactive_cherry_pick() {
 	local count
 	count=$(echo "$commits" | wc -l | tr -d ' ')
 	if (( count > 50 )); then
-		info "${count} commits available — consider narrowing your selection"
+		info "${count} commits available - consider narrowing your selection"
 	fi
 
 	local selected=""
@@ -455,7 +455,7 @@ interactive_cherry_pick() {
 			fail "Cherry-pick conflict on ${line}
         Resolve the conflict, then resume:
           git cherry-pick --continue
-          make release VERSION=v${VERSION}"
+          make release version=v${VERSION}"
 		fi
 		ok "Cherry-picked ${line}"
 	done <<< "$selected"
@@ -520,15 +520,15 @@ CURRENT_VERSION=$(detect_version)
 
 if [[ "$YANK" == true ]]; then
 	if [[ "$DRY_RUN" == true ]]; then
-		header "Yank (dry run) — ${PROJECT_NAME}"
+		header "Yank (dry run) - ${PROJECT_NAME}"
 	else
-		header "Yank — ${PROJECT_NAME}"
+		header "Yank - ${PROJECT_NAME}"
 	fi
 else
 	if [[ "$DRY_RUN" == true ]]; then
-		header "Release (dry run) — ${PROJECT_NAME}"
+		header "Release (dry run) - ${PROJECT_NAME}"
 	else
-		header "Release — ${PROJECT_NAME}"
+		header "Release - ${PROJECT_NAME}"
 	fi
 fi
 
@@ -621,7 +621,7 @@ if [[ "$YANK" == true ]]; then
 	fi
 
 	if ! git ls-remote --tags origin "$TAG" 2>/dev/null | grep -q "$TAG"; then
-		fail "Release tag ${TAG} does not exist on remote — nothing to yank"
+		fail "Release tag ${TAG} does not exist on remote - nothing to yank"
 	fi
 
 	if [[ "$DRY_RUN" == true ]]; then
@@ -700,6 +700,15 @@ fi
 
 ok "Release state: ${RESUME_STATE}"
 
+RELEASE_COMMIT_EXISTS=false
+if [[ "$RESUME_STATE" == "local" ]] \
+	&& [[ "$(git log -1 --pretty=%s 2>/dev/null)" == "chore(release):"* ]] \
+	&& [[ "$(detect_version)" == "$VERSION" ]] \
+	&& git diff --quiet \
+	&& git diff --cached --quiet; then
+	RELEASE_COMMIT_EXISTS=true
+fi
+
 # ---------------------------------------------------------------------------
 # Semver comparison (fresh forward releases only)
 # ---------------------------------------------------------------------------
@@ -709,20 +718,23 @@ if [[ "$RESUME_STATE" == "fresh" && "$RELEASE_MODE" == "forward" && -n "$CURRENT
 		if git ls-remote --tags origin "$TAG" 2>/dev/null | grep -q "$TAG"; then
 			fail "Already released v${VERSION}"
 		fi
-		info "Version already at ${VERSION} — resuming incomplete release"
+		info "Version already at ${VERSION} - resuming incomplete release"
 	elif [[ "$cmp" == "lt" ]]; then
 		fail "Requested version ${VERSION} is older than current ${CURRENT_VERSION}"
 	fi
 	ok "Version bump: ${CURRENT_VERSION} -> ${VERSION}"
 fi
 
-if [[ "$RESUME_STATE" == "fresh" && "$RELEASE_MODE" == "backport" ]]; then
+if [[ ( "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ) && "$RELEASE_MODE" == "backport" ]]; then
 	LINE_TAG=$(git tag --list "releases/v${SV_MAJOR}.${SV_MINOR}.*" --sort=-v:refname | head -1)
 	if [[ -n "$LINE_TAG" ]]; then
 		LINE_VER="${LINE_TAG#releases/v}"
 		line_cmp=$(semver_compare "$VERSION" "$LINE_VER")
 		if [[ "$line_cmp" == "eq" ]]; then
-			fail "Already released v${VERSION} on ${RELEASE_BRANCH}"
+			if git ls-remote --tags origin "$TAG" 2>/dev/null | grep -q "$TAG"; then
+				fail "Already released v${VERSION} on ${RELEASE_BRANCH}"
+			fi
+			info "Version already at ${VERSION} on ${RELEASE_BRANCH} - resuming incomplete release"
 		elif [[ "$line_cmp" == "lt" ]]; then
 			fail "Requested version ${VERSION} is older than latest ${LINE_VER} on ${RELEASE_BRANCH}"
 		fi
@@ -735,7 +747,9 @@ fi
 # ---------------------------------------------------------------------------
 SUBMODULE_REFS=()
 
-if [[ "$RESUME_STATE" == "fresh" && -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
+if [[ "$RELEASE_COMMIT_EXISTS" == false ]] \
+	&& [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]] \
+	&& [[ -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
 	prompt_suffix=""
 	if [[ "$RELEASE_MODE" == "backport" ]]; then
 		prompt_suffix=" for backport"
@@ -824,11 +838,12 @@ if [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]]; then
 		else
 			fail "main is not up to date with origin/main (pull or push first)"
 		fi
+	fi
 
-		if [[ -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
-			header "Resolving submodules..."
-			resolve_submodules
-		fi
+	if [[ "$RELEASE_COMMIT_EXISTS" == false && "$DRY_RUN" != true \
+		&& "$RELEASE_MODE" == "forward" && -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
+		header "Resolving submodules..."
+		resolve_submodules
 	fi
 fi
 
@@ -864,14 +879,6 @@ if [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]]; then
 			STEP=$((STEP + 1))
 			step $STEP "Cherry-pick commits"
 			interactive_cherry_pick "$RELEASE_BRANCH"
-
-			if [[ -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
-				header "Resolving submodules..."
-				resolve_submodules
-				STEP=$((STEP + 1))
-				step $STEP "Update submodule pointers"
-				stage_submodules
-			fi
 		else
 			STEP=$((STEP + 1))
 			step $STEP "Create branch ${BRANCH}"
@@ -886,9 +893,16 @@ if [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]]; then
 		fi
 	fi
 
-	if [[ "$RESUME_STATE" == "local" && "$(git log -1 --pretty=%s 2>/dev/null)" == "chore(release): v${VERSION}" ]]; then
+	if [[ "$RELEASE_COMMIT_EXISTS" == true ]]; then
 		info "Release commit already present; skipping version bump and commit"
 	else
+		if [[ "$RELEASE_MODE" == "backport" && -z "$REPO_DIR" && ${#SUBMODULES[@]} -gt 0 ]]; then
+			header "Resolving submodules..."
+			resolve_submodules
+			STEP=$((STEP + 1))
+			step $STEP "Update submodule pointers"
+			stage_submodules
+		fi
 		bump_version "$VERSION"
 
 		STEP=$((STEP + 1))
@@ -898,7 +912,7 @@ if [[ "$RESUME_STATE" == "fresh" || "$RESUME_STATE" == "local" ]]; then
 		STEP=$((STEP + 1))
 		step $STEP "Commit release"
 		if git diff --cached --quiet; then
-			info "Nothing staged — creating empty release marker commit"
+			info "Nothing staged - creating empty release marker commit"
 			git commit --allow-empty -m "chore(release): v${VERSION}"
 		else
 			git commit -m "chore(release): v${VERSION}"
@@ -967,7 +981,7 @@ ok "On ${PR_BASE} at $(git rev-parse --short HEAD)"
 STEP=$((STEP + 1))
 step $STEP "Create signed tag"
 if [[ -n "$(git tag --list "$TAG")" ]]; then
-	ok "Tag ${TAG} already exists locally — skipping creation"
+	ok "Tag ${TAG} already exists locally - skipping creation"
 else
 	compile_changelog
 	git tag -s -a "$TAG" -m "$CHANGELOG"

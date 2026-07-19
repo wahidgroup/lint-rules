@@ -1,4 +1,6 @@
-.PHONY: help help-body help-ref version setup lint spellcheck smoke audit ci release clean
+.PHONY: help help-body help-ref version setup lint spellcheck smoke pack sbom audit ci release clean
+
+.NOTPARALLEL: ci
 
 .DEFAULT_GOAL := help
 
@@ -7,13 +9,11 @@ PKG_VERSION := $(shell node -p "require('./package.json').version" 2>/dev/null)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null)
 GIT_DIRTY := $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo "+dirty")
 
-# Print wrapper (pager for long help)
 define PRINT_PAGER
 @{ $(1); } | less -FRX
 endef
 
-# lint / audit: enable fix mode with fix=1
-ifneq ($(strip $(fix)),)
+ifneq ($(filter 1,$(fix)),)
 LINT_MODE := fix
 else
 LINT_MODE := check
@@ -21,8 +21,10 @@ endif
 
 AUDIT_MODE := $(LINT_MODE)
 
-# release: make release VERSION=v0.1.0 dry-run=1 allow-staged=1
-#          make release yank=1
+ifneq ($(filter 1,$(debug)),)
+export LOG_LEVEL = debug
+endif
+
 RELEASE_FLAGS :=
 ifneq ($(filter 1,$(dry-run)),)
 RELEASE_FLAGS += --dry-run
@@ -34,7 +36,6 @@ ifneq ($(filter 1,$(yank)),)
 RELEASE_FLAGS += --yank
 endif
 
-# CI uses npm ci (lockfile-strict); local uses npm install
 ifdef CI
 NPM_INSTALL_CMD := npm ci
 else
@@ -46,7 +47,7 @@ help:
 
 help-body:
 	@printf 'USAGE:\n'
-	@printf '    make <target> [fix=1] [VERSION=vX.Y.Z] [dry-run=1] [allow-staged=1] [yank=1]\n\n'
+	@printf '    make <target> [fix=1] [debug=1] [version=vX.Y.Z] [dry-run=1] [allow-staged=1] [yank=1]\n\n'
 	@printf 'DESCRIPTION:\n'
 	@printf '    Build, lint, and release %s following POSIX/GNU CLI conventions.\n\n' '$(PROJECT)'
 	@printf 'TARGETS:\n'
@@ -57,25 +58,29 @@ help-body:
 	@printf '    lint         Run linters + spellcheck (fix mode via fix=1)\n'
 	@printf '    spellcheck   Run spell checker\n'
 	@printf '    smoke        Import every public export\n'
+	@printf '    pack         Assert npm pack contents (minimal + sbom)\n'
+	@printf '    sbom         Generate software bill of materials\n'
 	@printf '    audit        Run security audit (fix mode via fix=1)\n'
-	@printf '    ci           Lint + smoke\n'
+	@printf '    ci           Lint + smoke + pack\n'
 	@printf '    release      Release workflow (see OPTIONS)\n'
-	@printf '    clean        Remove build artifacts\n\n'
+	@printf '    clean        Remove artifacts and node_modules\n\n'
 	@printf 'OPTIONS / VARIABLES:\n'
-	@printf '    fix            If set (e.g., fix=1), apply lint/audit fixes\n'
-	@printf '    VERSION        Release version (e.g., VERSION=v0.1.0)\n'
-	@printf '    dry-run        If set (e.g., dry-run=1), preview release without changes\n'
-	@printf '    allow-staged   If set (e.g., allow-staged=1), include staged files in release\n'
-	@printf '    yank           If set (e.g., yank=1), yank a published version\n'
-	@printf '    NPM_INSTALL_FLAGS  Extra flags for npm install/ci (e.g. --ignore-scripts)\n\n'
+	@printf '    fix                If set (e.g., fix=1), apply lint/audit fixes\n'
+	@printf '    debug              If set (e.g., debug=1), enable debug logs\n'
+	@printf '    version            Release version (e.g., version=v0.1.0)\n'
+	@printf '    dry-run            If set (e.g., dry-run=1), preview release without changes\n'
+	@printf '    allow-staged       If set (e.g., allow-staged=1), include staged files in release\n'
+	@printf '    yank               If set (e.g., yank=1), yank a published version\n'
+	@printf '    NPM_INSTALL_FLAGS  Extra flags for npm install/ci (e.g. --ignore-scripts)\n'
+	@printf '    CI                 If set (CI=true), setup.sh uses npm ci\n\n'
 	@printf 'EXAMPLES:\n'
 	@printf '    make setup\n'
 	@printf '    make lint\n'
 	@printf '    make lint fix=1\n'
 	@printf '    make audit fix=1\n'
-	@printf '    make release VERSION=v0.1.0\n'
-	@printf '    make release VERSION=v0.1.0 dry-run=1\n'
-	@printf '    make release VERSION=v0.1.0 allow-staged=1\n'
+	@printf '    make release version=v0.1.0\n'
+	@printf '    make release version=v0.1.0 dry-run=1\n'
+	@printf '    make release version=v0.1.0 allow-staged=1\n'
 	@printf '    make release yank=1\n\n'
 	@printf 'EXIT STATUS:\n'
 	@printf '    0    Success\n'
@@ -91,13 +96,11 @@ version:
 	@v='$(PKG_VERSION)'; c='$(GIT_COMMIT)'; d='$(GIT_DIRTY)'; [ -n "$$v" ] || v=unknown; \
 	printf '%s %s (%s%s)\n' '$(PROJECT)' "$$v" "$$c" "$$d"
 
-node_modules: package.json package-lock.json
-	$(NPM_INSTALL_CMD) $(NPM_INSTALL_FLAGS)
-	@touch $@
+setup:
+	@chmod +x scripts/setup.sh
+	@./scripts/setup.sh
 
-setup: node_modules
-
-lint: node_modules
+lint: setup
 	@echo "Running linters (mode: $(LINT_MODE))..."
 ifeq ($(LINT_MODE),fix)
 	npm run format
@@ -108,15 +111,23 @@ else
 endif
 	npm run spellcheck
 
-spellcheck: node_modules
+spellcheck: setup
 	@echo "Checking spelling..."
 	npm run spellcheck
 
-smoke: node_modules
+smoke: setup
 	@echo "Smoke-loading public exports..."
 	npm run smoke
 
-audit: node_modules
+sbom: setup
+	@echo "Generating SBOM..."
+	npm run sbom
+
+pack: sbom
+	@echo "Checking npm pack contents..."
+	npm run pack:check
+
+audit: setup
 	@echo "Running security audit (mode: $(AUDIT_MODE))..."
 ifeq ($(AUDIT_MODE),fix)
 	npm audit fix
@@ -124,10 +135,13 @@ else
 	npm audit --audit-level=high
 endif
 
-ci: lint smoke
+ci:
+	$(MAKE) lint
+	$(MAKE) smoke
+	$(MAKE) pack
 
-release: node_modules
-	@./scripts/release.sh "$(VERSION)" $(RELEASE_FLAGS)
+release: setup
+	@./scripts/release.sh "$(version)" $(RELEASE_FLAGS)
 
 clean:
-	rm -rf node_modules
+	rm -rf node_modules sbom.json .make

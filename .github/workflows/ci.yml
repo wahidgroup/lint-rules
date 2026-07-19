@@ -4,24 +4,39 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   ci:
-    name: Lint
+    name: CI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: npm
 
-      - name: Install dependencies
+      - name: Configure GitHub Packages Auth
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+
+      - name: Setup
         run: make setup
 
       - name: CI
-        run: make ci
+        run: make ci ${{ runner.debug == '1' && 'debug=1' || '' }}
+
+      - name: Generate SBOM
+        run: make sbom
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
