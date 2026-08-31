@@ -43,7 +43,6 @@
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"spellcheck": "cspell \"**/*\"",
-		"smoke": "node ./scripts/smoke-exports.mjs",
 		"test": "vitest run",
 		"prepare": "husky",
 		"prepack": "npm run build",

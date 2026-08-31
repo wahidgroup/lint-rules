@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
+	ExportConditionResolver,
 	ImportCaseBuilder,
 	PackageVerificationError,
 	PackageVerificationHarness,
@@ -139,6 +140,77 @@ describe("package verification public API", () => {
 		regression.dispose();
 	});
 
+	test("prefers import over default when those targets differ by type", () => {
+		const resolver = new ExportConditionResolver("node");
+		const target = resolver.target(
+			{
+				".": {
+					default: "./data.json",
+					import: "./index.js",
+				},
+			},
+			".",
+		);
+		expect(target).toBe("./index.js");
+	});
+
+	test("prefers node over import when those targets differ by type", () => {
+		const resolver = new ExportConditionResolver("node");
+		const target = resolver.target(
+			{
+				".": {
+					import: "./data.json",
+					node: "./index.js",
+				},
+			},
+			".",
+		);
+		expect(target).toBe("./index.js");
+	});
+
+	test("skips types when selecting a Node runtime target", () => {
+		const resolver = new ExportConditionResolver("node");
+		const target = resolver.target(
+			{
+				"./package-verification": {
+					types: "./dist/package-verification/index.d.ts",
+					import: "./dist/package-verification/index.js",
+				},
+			},
+			"./package-verification",
+		);
+		expect(target).toBe("./dist/package-verification/index.js");
+	});
+
+	test("selects a JSON import target when that is the runtime file", () => {
+		const resolver = new ExportConditionResolver("node");
+		const target = resolver.target(
+			{
+				".": {
+					types: "./data.d.ts",
+					import: "./data.json",
+				},
+			},
+			".",
+		);
+		expect(target).toBe("./data.json");
+	});
+
+	test("uses browser conditions before import for browser consumers", () => {
+		const resolver = new ExportConditionResolver("browser");
+		const target = resolver.target(
+			{
+				".": {
+					browser: "./browser.js",
+					import: "./index.js",
+					default: "./data.json",
+				},
+			},
+			".",
+		);
+		expect(target).toBe("./browser.js");
+	});
+
 	test("audits every target in nested export arrays", () => {
 		const projectDirectory = regression.createPackage({
 			files: [
@@ -260,6 +332,37 @@ describe("package verification public API", () => {
 		});
 
 		const importCase = ImportCaseBuilder.create("browser-condition").exports(".").browser().noPeers().build();
+		const verifier = PackageVerificationHarnessBuilder.create()
+			.projectDirectory(projectDirectory)
+			.importCase(importCase)
+			.build();
+
+		expect(() => verifier.verify()).not.toThrow();
+	});
+
+	test("attaches JSON import attributes from the import target instead of types", () => {
+		const projectDirectory = regression.createPackage({
+			devDependencies: {
+				"@types/node": `file:${resolve("node_modules/@types/node")}`,
+				typescript: regression.typescriptDependency(),
+			},
+			files: [
+				{ content: "{}\n", path: "data.json" },
+				{
+					content: "declare const data: Record<string, never>;\nexport default data;\n",
+					path: "data.d.ts",
+				},
+			],
+			name: "json-import-fixture",
+			packageExports: {
+				".": {
+					types: "./data.d.ts",
+					import: "./data.json",
+				},
+			},
+		});
+
+		const importCase = ImportCaseBuilder.create("json-import").exports(".").node().noPeers().build();
 		const verifier = PackageVerificationHarnessBuilder.create()
 			.projectDirectory(projectDirectory)
 			.importCase(importCase)

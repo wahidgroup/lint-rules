@@ -241,7 +241,6 @@ make lint fix=1        # Auto-fix format + ESLint
 make spellcheck        # CSpell only
 make build             # Compile package verification tooling
 make test              # Package verification tests
-make smoke             # Import every public export
 make verify            # Pack, audit exports, peers, and isolated imports
 make sbom              # Generate CycloneDX SBOM
 make audit             # Security audit

@@ -4,8 +4,8 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 import type { NpmPackReport, PackageManifest } from "./package-verification-internals.js";
-import type { ImportCase, ImportEnvironment, PeerSelection } from "./types.js";
-import { JsonValueValidator } from "./json-value-validator.js";
+import type { ImportCase, PeerSelection } from "./types.js";
+import { ExportConditionResolver } from "./export-condition-resolver.js";
 import { NpmCommandEnvironment } from "./npm-command-environment.js";
 import { PackageVerificationError } from "./package-verification-error.js";
 
@@ -39,11 +39,6 @@ export class IsolatedImportCaseVerifier {
 	 * Identifies the verified package source.
 	 */
 	readonly #projectDirectory: string;
-
-	/**
-	 * Narrows untrusted export-map values.
-	 */
-	readonly #validator = new JsonValueValidator();
 
 	/**
 	 * Configures generated workspaces for one package source directory.
@@ -190,10 +185,11 @@ export class IsolatedImportCaseVerifier {
 	 * Generates import-only source from package export keys.
 	 */
 	private createImportSource(importCase: ImportCase, packageName: string, packageExports: unknown): string {
+		const resolver = new ExportConditionResolver(importCase.environment);
 		const imports: string[] = [];
 		for (const exportKey of importCase.exportKeys) {
 			const specifier = this.createPackageSpecifier(packageName, exportKey);
-			const target = this.resolveExportTarget(packageExports, exportKey, importCase.environment);
+			const target = resolver.target(packageExports, exportKey);
 
 			let attribute = "";
 			if (target.endsWith(".json")) {
@@ -205,83 +201,6 @@ export class IsolatedImportCaseVerifier {
 
 		const source = `${imports.join("\n")}\n`;
 		return source;
-	}
-
-	/**
-	 * Selects the first target available to the generated import environment.
-	 */
-	private resolveExportTarget(packageExports: unknown, exportKey: string, environment: ImportEnvironment): string {
-		const exportValue = this.selectExportValue(packageExports, exportKey);
-		const pending: unknown[] = [exportValue];
-		let target: string | undefined;
-		while (pending.length > 0) {
-			const value = pending.pop();
-			if (typeof value === "string") {
-				target = value;
-				break;
-			}
-			if (Array.isArray(value)) {
-				const candidates = [...value].reverse();
-				for (const candidate of candidates) {
-					pending.push(candidate);
-				}
-				continue;
-			}
-
-			const conditions = this.#validator.optionalRecord(value);
-			if (conditions === undefined) {
-				continue;
-			}
-
-			const entries = Object.entries(conditions).reverse();
-			for (const [condition, candidate] of entries) {
-				if (this.isActiveImportCondition(condition, environment)) {
-					pending.push(candidate);
-				}
-			}
-		}
-
-		assert.ok(target !== undefined, `No import target for package export ${exportKey}`);
-
-		return target;
-	}
-
-	/**
-	 * Selects one top-level package export value.
-	 */
-	private selectExportValue(packageExports: unknown, exportKey: string): unknown {
-		const exportsRecord = this.#validator.optionalRecord(packageExports);
-		let exportValue: unknown;
-		if (exportsRecord === undefined) {
-			assert.equal(exportKey, ".", "Root export value requires key .");
-			exportValue = packageExports;
-		} else {
-			const subpathExports = Object.keys(exportsRecord).some((key) => key.startsWith("."));
-			if (!subpathExports) {
-				assert.equal(exportKey, ".", "Conditional root export requires key .");
-				exportValue = packageExports;
-			} else {
-				exportValue = exportsRecord[exportKey];
-				assert.notEqual(exportValue, undefined, `Missing package export ${exportKey}`);
-			}
-		}
-		return exportValue;
-	}
-
-	/**
-	 * Reports whether one package condition applies to the generated environment.
-	 */
-	private isActiveImportCondition(condition: string, environment: ImportEnvironment): boolean {
-		let active = false;
-		if (condition === "default" || condition === "import") {
-			active = true;
-		} else if (condition === "node") {
-			active = environment === "node";
-		} else if (condition === "browser") {
-			active = environment !== "node";
-		}
-
-		return active;
 	}
 
 	/**

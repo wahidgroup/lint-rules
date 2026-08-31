@@ -1,3 +1,4 @@
+export { ExportConditionResolver } from "./export-condition-resolver.js";
 export { ImportCaseBuilder } from "./import-case-builder.js";
 export { PackageVerificationError } from "./package-verification-error.js";
 export type { PackageVerificationErrorCode } from "./package-verification-error.js";

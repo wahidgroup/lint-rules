@@ -17,13 +17,4 @@ export default defineConfig(
 			"@typescript-eslint/no-empty-function": ["error", { allow: ["private-constructors"] }],
 		},
 	},
-	{
-		files: ["scripts/**/*.mjs"],
-		languageOptions: {
-			globals: {
-				console: "readonly",
-				process: "readonly",
-			},
-		},
-	},
 );

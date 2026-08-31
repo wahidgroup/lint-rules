@@ -1,4 +1,4 @@
-.PHONY: all help help-body help-ref version setup lint spellcheck build test smoke verify sbom audit ci release clean
+.PHONY: all help help-body help-ref version setup lint spellcheck build test verify sbom audit ci release clean
 
 .NOTPARALLEL: all ci
 
@@ -52,7 +52,6 @@ help-body:
 	@printf '    spellcheck   Run spell checker\n'
 	@printf '    build        Compile package verification tooling\n'
 	@printf '    test         Run package verification tests\n'
-	@printf '    smoke        Import every public export\n'
 	@printf '    verify       Pack, audit exports, peers, and isolated imports\n'
 	@printf '    sbom         Generate software bill of materials\n'
 	@printf '    audit        Run security audit (fix mode via fix=1)\n'
@@ -117,10 +116,6 @@ endif
 spellcheck: setup
 	@echo "Checking spelling..."
 	npm run spellcheck
-
-smoke: build
-	@echo "Smoke-loading public exports..."
-	npm run smoke
 
 build: setup
 	@echo "Building package verification tooling..."
