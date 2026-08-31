@@ -118,7 +118,7 @@ export class PackageVerificationHarnessBuilder {
 	#verifyLockfilePins = true;
 
 	/**
-	 * Requires engines.node to cap the current major.
+	 * Requires engines.node to cap the running major declared by `.nvmrc`.
 	 */
 	#verifyNodeEngineCap = false;
 
@@ -274,7 +274,7 @@ export class PackageVerificationHarnessBuilder {
 	}
 
 	/**
-	 * Requires engines.node to cap the current major.
+	 * Requires engines.node to cap the running major declared by `.nvmrc`.
 	 */
 	verifyNodeEngineCap(verifyNodeEngineCap: boolean): PackageVerificationHarnessBuilder {
 		this.#verifyNodeEngineCap = verifyNodeEngineCap;

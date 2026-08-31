@@ -70,7 +70,7 @@ export interface PackageVerificationConfiguration {
 	readonly verifyLockfilePins: boolean;
 
 	/**
-	 * Requires engines.node to cap the current major.
+	 * Requires engines.node to cap the running major declared by `.nvmrc`.
 	 */
 	readonly verifyNodeEngineCap: boolean;
 

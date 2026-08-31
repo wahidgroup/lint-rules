@@ -21,6 +21,7 @@ interface FixturePackage {
 	readonly engines?: Readonly<Record<string, string>>;
 	readonly extraPackFiles?: readonly string[];
 	readonly files: readonly FixtureFile[];
+	readonly filesField?: readonly string[];
 	readonly lockfile?: unknown;
 	readonly name: string;
 	readonly packageExports: unknown;
@@ -65,11 +66,16 @@ class PackageVerificationRegressionHarness {
 		}
 
 		const packFiles = [...filePaths, ...(fixture.extraPackFiles ?? [])];
+		let files = packFiles;
+		if (fixture.filesField !== undefined) {
+			files = [...fixture.filesField];
+		}
+
 		const manifest = {
 			devDependencies: fixture.devDependencies,
 			engines: fixture.engines,
 			exports: fixture.packageExports,
-			files: packFiles,
+			files,
 			name: fixture.name,
 			peerDependencies: fixture.peerDependencies,
 			peerDependenciesMeta: fixture.peerDependenciesMeta,
@@ -127,9 +133,18 @@ class PackageVerificationRegressionHarness {
 		const dependency = `file:${this.#typescriptDirectory}`;
 		return dependency;
 	}
+
+	/**
+	 * Writes a major-only `.nvmrc` for engine-cap fixtures.
+	 */
+	writeNvmrc(projectDirectory: string, major: number): void {
+		writeFileSync(join(projectDirectory, ".nvmrc"), `${major}\n`);
+	}
 }
 
 describe("package verification public API", () => {
+	const runningNodeMajor = Number.parseInt(process.versions.node, 10);
+
 	let regression: PackageVerificationRegressionHarness;
 
 	beforeEach(() => {
@@ -700,6 +715,20 @@ describe("package verification public API", () => {
 		expect(() => verifier.verify()).toThrow("files entry not in pack: missing.js");
 	});
 
+	test("accepts files entries that start with ./", () => {
+		const projectDirectory = regression.createPackage({
+			files: [{ content: "export const value = true;\n", path: "dist/index.js" }],
+			filesField: ["./dist"],
+			name: "dotted-files-entry-fixture",
+			packageExports: {
+				".": "./dist/index.js",
+			},
+		});
+
+		const verifier = regression.createVerifier(projectDirectory);
+		expect(() => verifier.verify()).not.toThrow();
+	});
+
 	test("rejects lockfile pins that drift from package.json", () => {
 		const projectDirectory = regression.createPackage({
 			devDependencies: {
@@ -773,5 +802,94 @@ describe("package verification public API", () => {
 		expect(() => verifier.verify()).toThrow(
 			"engines.node must be a capped major range such as >=24 <25, found >=24",
 		);
+	});
+
+	test("rejects engines.node whose exclusive upper bound is not the next major", () => {
+		const projectDirectory = regression.createPackage({
+			engines: {
+				node: `>=${runningNodeMajor} <${runningNodeMajor + 2}`,
+			},
+			files: [{ content: "export const value = true;\n", path: "index.js" }],
+			name: "node-engine-upper-fixture",
+			packageExports: {
+				".": "./index.js",
+			},
+		});
+
+		const verifier = PackageVerificationHarnessBuilder.create()
+			.projectDirectory(projectDirectory)
+			.verifyNodeEngineCap(true)
+			.build();
+		expect(() => verifier.verify()).toThrow(
+			`engines.node exclusive upper bound must be ${runningNodeMajor + 1}, found ${runningNodeMajor + 2}`,
+		);
+	});
+
+	test("rejects engines.node that does not match .nvmrc", () => {
+		const projectDirectory = regression.createPackage({
+			engines: {
+				node: `>=${runningNodeMajor} <${runningNodeMajor + 1}`,
+			},
+			files: [{ content: "export const value = true;\n", path: "index.js" }],
+			name: "node-engine-nvmrc-fixture",
+			packageExports: {
+				".": "./index.js",
+			},
+		});
+
+		regression.writeNvmrc(projectDirectory, runningNodeMajor + 1);
+
+		const verifier = PackageVerificationHarnessBuilder.create()
+			.projectDirectory(projectDirectory)
+			.verifyNodeEngineCap(true)
+			.build();
+		expect(() => verifier.verify()).toThrow(
+			`.nvmrc major ${runningNodeMajor + 1} does not match engines.node floor ${runningNodeMajor}`,
+		);
+	});
+
+	test("rejects engines.node that does not match the running Node major", () => {
+		const otherMajor = runningNodeMajor - 1;
+		const projectDirectory = regression.createPackage({
+			engines: {
+				node: `>=${otherMajor} <${runningNodeMajor}`,
+			},
+			files: [{ content: "export const value = true;\n", path: "index.js" }],
+			name: "node-engine-running-fixture",
+			packageExports: {
+				".": "./index.js",
+			},
+		});
+
+		regression.writeNvmrc(projectDirectory, otherMajor);
+
+		const verifier = PackageVerificationHarnessBuilder.create()
+			.projectDirectory(projectDirectory)
+			.verifyNodeEngineCap(true)
+			.build();
+		expect(() => verifier.verify()).toThrow(
+			`running Node major ${runningNodeMajor} does not match engines.node floor ${otherMajor}`,
+		);
+	});
+
+	test("accepts engines.node that caps the running major declared by .nvmrc", () => {
+		const projectDirectory = regression.createPackage({
+			engines: {
+				node: `>=${runningNodeMajor} <${runningNodeMajor + 1}`,
+			},
+			files: [{ content: "export const value = true;\n", path: "index.js" }],
+			name: "node-engine-match-fixture",
+			packageExports: {
+				".": "./index.js",
+			},
+		});
+
+		regression.writeNvmrc(projectDirectory, runningNodeMajor);
+
+		const verifier = PackageVerificationHarnessBuilder.create()
+			.projectDirectory(projectDirectory)
+			.verifyNodeEngineCap(true)
+			.build();
+		expect(() => verifier.verify()).not.toThrow();
 	});
 });

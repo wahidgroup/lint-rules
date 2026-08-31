@@ -68,15 +68,20 @@ export class FilesFieldAuditor {
 	 * Reports whether a packed path is covered by `files` or npm always-packed names.
 	 */
 	private isAllowed(file: string, filesField: readonly string[]): boolean {
-		if (alwaysPackedNames.has(file.toLowerCase())) {
+		const packedPath = this.packPath(file);
+		if (alwaysPackedNames.has(packedPath.toLowerCase())) {
 			return true;
 		}
 
 		for (const entry of filesField) {
-			if (file === entry) {
+			const allowlist = this.packPath(entry);
+			if (allowlist.length === 0) {
+				continue;
+			}
+			if (packedPath === allowlist) {
 				return true;
 			}
-			if (file.startsWith(`${entry}/`)) {
+			if (packedPath.startsWith(`${allowlist}/`)) {
 				return true;
 			}
 		}
@@ -88,17 +93,33 @@ export class FilesFieldAuditor {
 	 * Reports whether a `files` entry appears as a packed file or directory prefix.
 	 */
 	private isPresent(entry: string, packed: ReadonlySet<string>): boolean {
-		if (packed.has(entry)) {
+		const allowlist = this.packPath(entry);
+		if (allowlist.length === 0) {
+			return false;
+		}
+		if (packed.has(allowlist)) {
 			return true;
 		}
 
-		const prefix = `${entry}/`;
+		const prefix = `${allowlist}/`;
 		for (const file of packed) {
-			if (file.startsWith(prefix)) {
+			if (this.packPath(file).startsWith(prefix)) {
 				return true;
 			}
 		}
 
 		return false;
+	}
+
+	/**
+	 * Strips a leading `./` so npm `files` entries match packed paths.
+	 */
+	private packPath(path: string): string {
+		let normalized = path;
+		if (normalized.startsWith("./")) {
+			normalized = normalized.slice(2);
+		}
+
+		return normalized;
 	}
 }

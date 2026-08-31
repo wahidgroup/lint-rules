@@ -54,9 +54,9 @@ export class PackageVerificationHarness {
 	readonly #manifestReader: PackageManifestReader;
 
 	/**
-	 * Requires engines.node to cap the current major.
+	 * Requires engines.node to cap the running major declared by `.nvmrc`.
 	 */
-	readonly #nodeEngineAuditor = new NodeEngineAuditor();
+	readonly #nodeEngineAuditor: NodeEngineAuditor;
 
 	/**
 	 * Creates the archive consumed by verification.
@@ -96,6 +96,7 @@ export class PackageVerificationHarness {
 		this.#graphAuditor = new ImportGraphAuditor(configuration.projectDirectory);
 		this.#lockfilePinAuditor = new LockfilePinAuditor(configuration.projectDirectory);
 		this.#manifestReader = new PackageManifestReader(configuration.projectDirectory);
+		this.#nodeEngineAuditor = new NodeEngineAuditor(configuration.projectDirectory);
 		this.#packer = new NpmPackagePacker(configuration.projectDirectory);
 		this.#packedArchiveVerifier = new PackedArchiveVerifier(configuration.projectDirectory);
 		this.#tarballAuditor = new PackageTarballAuditor(configuration);
