@@ -241,11 +241,12 @@ make lint fix=1        # Auto-fix format + ESLint
 make spellcheck        # CSpell only
 make build             # Compile package verification tooling
 make test              # Package verification tests
+make coverage          # Tests + Cobertura report (coverage/)
 make verify            # Pack, audit exports, peers, and isolated imports
 make sbom              # Generate CycloneDX SBOM
 make audit             # Security audit
 make audit fix=1       # npm audit fix
-make ci                # lint + test + verify
+make ci                # lint + coverage + verify
 make clean             # Remove artifacts + node_modules
 ```
 

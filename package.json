@@ -44,6 +44,7 @@
 		"format:check": "prettier --check .",
 		"spellcheck": "cspell \"**/*\"",
 		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
 		"prepare": "husky",
 		"prepack": "npm run build",
 		"prepublishOnly": "make sbom",
@@ -76,10 +77,10 @@
 	},
 	"peerDependencies": {
 		"@darraghor/eslint-plugin-nestjs-typed": "^7.3.4",
+		"eslint": ">=9",
 		"eslint-plugin-jsx-a11y": "^6.10.2",
 		"eslint-plugin-playwright": "^2.11.0",
 		"eslint-plugin-react-hooks": "^7.1.1",
-		"eslint": ">=9",
 		"prettier": "^3.9.6",
 		"typescript": ">=6 <6.1.0"
 	},
@@ -104,6 +105,7 @@
 		"@cyclonedx/cyclonedx-npm": "6.0.1",
 		"@darraghor/eslint-plugin-nestjs-typed": "7.3.4",
 		"@types/node": "24.13.3",
+		"@vitest/coverage-v8": "4.1.11",
 		"cspell": "10.1.1",
 		"eslint": "9.39.5",
 		"eslint-plugin-jsx-a11y": "6.10.2",

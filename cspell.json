@@ -1,6 +1,6 @@
 {
 	"$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/packages/cspell-types/cspell.schema.json",
 	"import": ["./cspell.base.json"],
-	"words": ["darraghor", "licence"],
-	"ignorePaths": ["node_modules", "package-lock.json", "dist", ".package-verification"]
+	"words": ["darraghor", "licence", "Cobertura"],
+	"ignorePaths": ["node_modules", "package-lock.json", "dist", ".package-verification", "coverage"]
 }

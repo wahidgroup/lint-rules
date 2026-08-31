@@ -1,4 +1,4 @@
-.PHONY: all help help-body help-ref version setup lint spellcheck build test verify sbom audit ci release clean
+.PHONY: all help help-body help-ref version setup lint spellcheck build test coverage verify sbom audit ci release clean
 
 .NOTPARALLEL: all ci
 
@@ -52,10 +52,11 @@ help-body:
 	@printf '    spellcheck   Run spell checker\n'
 	@printf '    build        Compile package verification tooling\n'
 	@printf '    test         Run package verification tests\n'
+	@printf '    coverage     Run tests with Cobertura coverage report\n'
 	@printf '    verify       Pack, audit exports, peers, and isolated imports\n'
 	@printf '    sbom         Generate software bill of materials\n'
 	@printf '    audit        Run security audit (fix mode via fix=1)\n'
-	@printf '    ci           Lint + test + verify\n'
+	@printf '    ci           Lint + coverage + verify\n'
 	@printf '    release      Release workflow (see OPTIONS)\n'
 	@printf '    clean        Remove artifacts and node_modules\n\n'
 	@printf 'OPTIONS / VARIABLES:\n'
@@ -126,6 +127,10 @@ test: setup .tmp
 	@echo "Running package verification tests..."
 	npm run test
 
+coverage: setup .tmp
+	@echo "Running tests with coverage..."
+	npm run test:coverage
+
 sbom: setup
 	@echo "Generating SBOM..."
 	npm run sbom
@@ -147,7 +152,7 @@ endif
 
 ci:
 	$(MAKE) lint
-	$(MAKE) test
+	$(MAKE) coverage
 	$(MAKE) verify
 
 release: setup
@@ -157,4 +162,4 @@ release: setup
 		./scripts/release.sh "$(RELEASE_VERSION)"
 
 clean:
-	rm -rf node_modules sbom.json .make dist .package-verification .tmp
+	rm -rf node_modules sbom.json .make dist .package-verification .tmp coverage

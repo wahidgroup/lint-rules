@@ -11,5 +11,8 @@ dist/
 .vitest-cache/
 .npm-cache-tmp/
 
+# Test coverage
+coverage/
+
 # Make
 .make/
