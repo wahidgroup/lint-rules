@@ -92,6 +92,7 @@
 		"node_modules",
 		"target",
 		"dist",
+		".package-verification",
 		"*.lock",
 		"package-lock.json",
 		"npm-shrinkwrap.json",

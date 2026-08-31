@@ -4,7 +4,7 @@ The key words "MUST", "MUST NOT", "SHOULD", "SHOULD NOT", and "MAY" in this docu
 
 ## Getting Started
 
-Contributors MUST have Node.js (>=24), Git, and Make.
+Contributors MUST have Node.js 24 LTS (`.nvmrc` and `engines.node`), npm matching `engines.npm` (enforced by `.npmrc` `engine-strict=true`), Git, Make, and jq.
 
 ```bash
 make setup

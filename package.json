@@ -23,12 +23,14 @@
 		"url": "git+https://github.com/wahidgroup/ts-lint.git"
 	},
 	"engines": {
-		"node": ">=24"
+		"node": ">=24 <25",
+		"npm": ">=12"
 	},
 	"files": [
 		"LICENSE",
 		"README.md",
 		".editorconfig",
+		"dist/package-verification",
 		"eslint",
 		"prettier.mjs",
 		"tsconfig.base.json",
@@ -36,13 +38,15 @@
 		"sbom.json"
 	],
 	"scripts": {
+		"build": "tsc --project tsconfig.build.json",
 		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"spellcheck": "cspell \"**/*\"",
-		"smoke": "node ./scripts/smoke-exports.mjs",
-		"pack:check": "node ./scripts/check-pack.mjs",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
 		"prepare": "husky",
+		"prepack": "npm run build",
 		"prepublishOnly": "make sbom",
 		"sbom": "cyclonedx-npm --omit dev --package-lock-only --flatten-components --short-PURLs --output-reproducible --output-file sbom.json"
 	},
@@ -56,25 +60,29 @@
 		"./prettier": "./prettier.mjs",
 		"./tsconfig": "./tsconfig.base.json",
 		"./cspell": "./cspell.base.json",
-		"./editorconfig": "./.editorconfig"
+		"./editorconfig": "./.editorconfig",
+		"./package-verification": {
+			"types": "./dist/package-verification/index.d.ts",
+			"import": "./dist/package-verification/index.js"
+		}
 	},
 	"dependencies": {
-		"@eslint/js": "9.39.2",
+		"@eslint/js": "9.39.5",
 		"eslint-config-prettier": "10.1.8",
 		"eslint-plugin-import": "2.32.0",
-		"typescript-eslint": "8.61.1"
+		"typescript-eslint": "8.68.0"
 	},
 	"publishConfig": {
 		"registry": "https://npm.pkg.github.com"
 	},
 	"peerDependencies": {
-		"@darraghor/eslint-plugin-nestjs-typed": "^7.2.4",
-		"eslint-plugin-jsx-a11y": "^6.10.2",
-		"eslint-plugin-playwright": "^2.10.4",
-		"eslint-plugin-react-hooks": "^7.1.1",
+		"@darraghor/eslint-plugin-nestjs-typed": "^7.3.4",
 		"eslint": ">=9",
-		"prettier": ">=3",
-		"typescript": ">=5"
+		"eslint-plugin-jsx-a11y": "^6.10.2",
+		"eslint-plugin-playwright": "^2.11.0",
+		"eslint-plugin-react-hooks": "^7.1.1",
+		"prettier": "^3.9.6",
+		"typescript": ">=6 <6.1.0"
 	},
 	"peerDependenciesMeta": {
 		"@darraghor/eslint-plugin-nestjs-typed": {
@@ -94,14 +102,18 @@
 		}
 	},
 	"devDependencies": {
-		"@cyclonedx/cyclonedx-npm": "6.0.0",
-		"@darraghor/eslint-plugin-nestjs-typed": "7.2.4",
-		"cspell": "9.7.0",
-		"eslint": "9.39.2",
+		"@cyclonedx/cyclonedx-npm": "6.0.1",
+		"@darraghor/eslint-plugin-nestjs-typed": "7.3.4",
+		"@types/node": "24.13.3",
+		"@vitest/coverage-v8": "4.1.11",
+		"cspell": "10.1.1",
+		"eslint": "9.39.5",
 		"eslint-plugin-jsx-a11y": "6.10.2",
-		"eslint-plugin-playwright": "2.10.4",
+		"eslint-plugin-playwright": "2.11.0",
 		"eslint-plugin-react-hooks": "7.1.1",
 		"husky": "9.1.7",
-		"prettier": "3.8.4"
+		"prettier": "3.9.6",
+		"typescript": "6.0.3",
+		"vitest": "4.1.11"
 	}
 }

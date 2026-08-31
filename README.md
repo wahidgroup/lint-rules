@@ -1,4 +1,4 @@
-# @wahidgroup/lint-rules
+# lint-rules
 
 Shared ESLint flat configs, Prettier, TypeScript, EditorConfig, and CSpell for TypeScript projects.
 
@@ -15,26 +15,26 @@ GitHub Packages (scoped). In project `.npmrc`:
 npm install --save-dev @wahidgroup/lint-rules
 ```
 
-**Required peers:** `eslint` (>=9), `typescript` (>=5).  
-**Optional peer:** `prettier` (>=3) - only if you use the Prettier export.
+**Required peers:** `eslint` (>=9), `typescript` (>=6 <6.1).
+**Optional peer:** `prettier` (^3.9.6) - only if you use the Prettier export.
 
 Framework exports need matching **optional peers** (not installed by default). Ranges allow compatible minors; this repo pins the tested floors in `devDependencies`:
 
 | Export              | Also install                                                        |
 | ------------------- | ------------------------------------------------------------------- |
 | `eslint/react`      | `eslint-plugin-react-hooks@^7.1.1` `eslint-plugin-jsx-a11y@^6.10.2` |
-| `eslint/nestjs`     | `@darraghor/eslint-plugin-nestjs-typed@^7.2.4`                      |
-| `eslint/playwright` | `eslint-plugin-playwright@^2.10.4`                                  |
+| `eslint/nestjs`     | `@darraghor/eslint-plugin-nestjs-typed@^7.3.4`                      |
+| `eslint/playwright` | `eslint-plugin-playwright@^2.11.0`                                  |
 
 ```bash
 # React
 npm install --save-dev eslint-plugin-react-hooks@^7.1.1 eslint-plugin-jsx-a11y@^6.10.2
 
 # NestJS
-npm install --save-dev @darraghor/eslint-plugin-nestjs-typed@^7.2.4
+npm install --save-dev @darraghor/eslint-plugin-nestjs-typed@^7.3.4
 
 # Playwright
-npm install --save-dev eslint-plugin-playwright@^2.10.4
+npm install --save-dev eslint-plugin-playwright@^2.11.0
 ```
 
 ## Quick start
@@ -161,7 +161,7 @@ export default defineConfig(...base, ...playwright, {
 
 ## Prettier
 
-Hard tabs, tab width 4. Other options use Prettier defaults (double quotes, semicolons, trailing commas `"all"`, print width 80). YAML overrides: spaces, width 2.
+Hard tabs, tab width 4, print width 120. Other options use Prettier defaults (double quotes, semicolons, trailing commas `"all"`). YAML overrides: spaces, width 2.
 
 ```javascript
 export { default } from "@wahidgroup/lint-rules/prettier";
@@ -203,6 +203,22 @@ Enforces:
 - YAML: spaces, indent size 2
 - Markdown: keep trailing whitespace
 
+## Package verification
+
+`PackageVerificationHarnessBuilder` packs the consumer package, checks
+`files`, lockfile pins, peer floors, and optional isolated imports.
+
+```javascript
+import { PackageVerificationHarnessBuilder } from "@wahidgroup/lint-rules/package-verification";
+
+const harness = PackageVerificationHarnessBuilder.create()
+	.projectDirectory(process.cwd())
+	.verifyNodeEngineCap(true)
+	.build();
+
+harness.verify();
+```
+
 ## CSpell
 
 ```json
@@ -216,24 +232,27 @@ Enforces:
 ## Development
 
 ```bash
-make help              # Usage (default)
+make all               # Setup, build, test, verify (default)
+make help              # Usage
 make version           # Package version + git commit
 make setup             # Install dependencies
 make lint              # Format check, ESLint, spellcheck
 make lint fix=1        # Auto-fix format + ESLint
 make spellcheck        # CSpell only
-make smoke             # Import every public export
-make pack              # Assert npm pack matches files (+ SBOM)
+make build             # Compile package verification tooling
+make test              # Package verification tests
+make coverage          # Tests + Cobertura report (coverage/)
+make verify            # Pack, audit exports, peers, and isolated imports
 make sbom              # Generate CycloneDX SBOM
 make audit             # Security audit
 make audit fix=1       # npm audit fix
-make ci                # lint + smoke + pack
+make ci                # lint + coverage + verify
 make clean             # Remove artifacts + node_modules
 ```
 
 ## Releasing
 
-Publish to **GitHub Packages** (`npm.pkg.github.com`) via `GITHUB_TOKEN`. Tag `releases/v*` runs CI, publishes, and attaches `sbom.json` to the GitHub Release.
+Publish to **GitHub Packages** (`npm.pkg.github.com`) via `GITHUB_TOKEN`. Tag `releases/v`* runs CI, publishes, and attaches `sbom.json` to the GitHub Release.
 
 ```bash
 make release version=v0.1.0                  # Full release workflow
