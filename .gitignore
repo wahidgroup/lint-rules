@@ -4,6 +4,12 @@ node_modules/
 # Generated artifacts
 sbom.json
 *.tgz
+dist/
+.package-verification/
+.tmp/
+.cache/
+.vitest-cache/
+.npm-cache-tmp/
 
 # Make
 .make/

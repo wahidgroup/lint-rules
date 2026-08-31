@@ -20,24 +20,15 @@ const base = [
 			import: importPlugin,
 		},
 		rules: {
-			"@typescript-eslint/consistent-type-assertions": [
-				"error",
-				{ assertionStyle: "never" },
-			],
+			"@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "never" }],
 			"@typescript-eslint/consistent-type-imports": [
 				"error",
 				{ prefer: "type-imports", fixStyle: "separate-type-imports" },
 			],
 			"@typescript-eslint/no-import-type-side-effects": "error",
 			"@typescript-eslint/no-non-null-assertion": "error",
-			"@typescript-eslint/no-unused-vars": [
-				"error",
-				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
-			],
-			"import/consistent-type-specifier-style": [
-				"error",
-				"prefer-top-level",
-			],
+			"@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+			"import/consistent-type-specifier-style": ["error", "prefer-top-level"],
 			curly: ["error", "all"],
 			eqeqeq: ["error", "always"],
 			"no-var": "error",

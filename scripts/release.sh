@@ -12,7 +12,7 @@ fi
 # SYNOPSIS
 #	scripts/release.sh [version] [--dry-run] [--allow-staged] [--yank]
 #	                   [--<submodule>]
-#	make release [version=vX.Y.Z]
+#	make release [version=vX.Y.Z] [dry-run=1] [allow-staged=1] [yank=1]
 #
 # DESCRIPTION
 #	Drives a release from version bump to signed tag as a finite state
@@ -35,8 +35,12 @@ fi
 #	--allow-staged  Include already-staged changes in the release commit.
 #	--yank          Yank a published release: delete the GitHub release,
 #	                push signed yanked/v* marker. Release tag preserved.
-#	--<submodule>   Run against the named submodule from .gitmodules
-#	                (at most one).
+#	--<submodule>   Run against the named submodule from .gitmodules.
+#
+# ENVIRONMENT
+#	DRY_RUN         Non-empty enables --dry-run (set by make dry-run=1).
+#	ALLOW_STAGED    Non-empty enables --allow-staged (allow-staged=1).
+#	YANK            Non-empty enables --yank (yank=1).
 #
 # EXIT STATUS
 #	0  Release complete (or already complete), yank complete, or dry run.
@@ -368,10 +372,12 @@ ${body}"
 	elif [[ -n "$components" ]]; then
 		CHANGELOG="${changelog_title}
 ${components}"
-	else
+	elif [[ -n "$body" ]]; then
 		CHANGELOG="${changelog_title}
 
 ${body}"
+	else
+		CHANGELOG="$changelog_title"
 	fi
 }
 
@@ -595,7 +601,7 @@ ensure_release_branch() {
 		local tag_candidate tag_minor
 		while IFS= read -r tag_candidate; do
 			[[ -z "$tag_candidate" ]] && continue
-			tag_minor="${tag_candidate#releases/v"${major}".}"
+			tag_minor="${tag_candidate#"releases/v${major}."}"
 			tag_minor="${tag_minor%%.*}"
 			[[ "$tag_minor" =~ ^[0-9]+$ ]] || continue
 			# Never base a new minor line on a higher minor's tag
@@ -701,11 +707,25 @@ interactive_cherry_pick() {
 # ---------------------------------------------------------------------------
 
 parse_args() {
+	local dry_run_env="${DRY_RUN:-}"
+	local allow_staged_env="${ALLOW_STAGED:-}"
+	local yank_env="${YANK:-}"
+
 	DRY_RUN=false
 	ALLOW_STAGED=false
 	YANK=false
 	VERSION=""
 	REPO_DIR=""
+
+	if [[ -n "$dry_run_env" ]]; then
+		DRY_RUN=true
+	fi
+	if [[ -n "$allow_staged_env" ]]; then
+		ALLOW_STAGED=true
+	fi
+	if [[ -n "$yank_env" ]]; then
+		YANK=true
+	fi
 
 	local arg matched submod
 	for arg in "$@"; do
@@ -1452,7 +1472,6 @@ main() {
 	parse_args "$@"
 	enter_submodule_mode
 
-	CURRENT_VERSION=""
 	CURRENT_VERSION=$(detect_version)
 
 	print_run_header

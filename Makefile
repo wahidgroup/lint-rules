@@ -1,8 +1,8 @@
-.PHONY: help help-body help-ref version setup lint spellcheck smoke pack sbom audit ci release clean
+.PHONY: all help help-body help-ref version setup lint spellcheck build test smoke verify sbom audit ci release clean
 
-.NOTPARALLEL: ci
+.NOTPARALLEL: all ci
 
-.DEFAULT_GOAL := help
+.DEFAULT_GOAL := all
 
 PROJECT := lint-rules
 PKG_VERSION := $(shell node -p "require('./package.json').version" 2>/dev/null)
@@ -21,28 +21,18 @@ endif
 
 AUDIT_MODE := $(LINT_MODE)
 
-RELEASE_FLAGS :=
-ifneq ($(filter 1,$(dry-run)),)
-RELEASE_FLAGS += --dry-run
-endif
-ifneq ($(filter 1,$(allow-staged)),)
-RELEASE_FLAGS += --allow-staged
-endif
-ifneq ($(filter 1,$(yank)),)
-RELEASE_FLAGS += --yank
-endif
-
-# Prefer version= (veneer); accept VERSION= for back-compat
 RELEASE_VERSION := $(version)
-ifeq ($(strip $(RELEASE_VERSION)),)
-RELEASE_VERSION := $(VERSION)
-endif
 
 ifdef CI
 NPM_INSTALL_CMD := npm ci
 else
 NPM_INSTALL_CMD := npm install
 endif
+
+export TMPDIR := $(CURDIR)/.tmp
+
+.tmp:
+	mkdir -p "$(TMPDIR)"
 
 help:
 	$(call PRINT_PAGER,$(MAKE) help-body)
@@ -53,28 +43,33 @@ help-body:
 	@printf 'DESCRIPTION:\n'
 	@printf '    Build, lint, and release %s following POSIX/GNU CLI conventions.\n\n' '$(PROJECT)'
 	@printf 'TARGETS:\n'
+	@printf '    all          Setup, build, test, and verify (default)\n'
 	@printf '    help         Show this help and exit\n'
 	@printf '    help-ref     Show reference documentation links\n'
 	@printf '    version      Show project version information\n'
 	@printf '    setup        Install dependencies\n'
 	@printf '    lint         Run linters + spellcheck (fix mode via fix=1)\n'
 	@printf '    spellcheck   Run spell checker\n'
+	@printf '    build        Compile package verification tooling\n'
+	@printf '    test         Run package verification tests\n'
 	@printf '    smoke        Import every public export\n'
-	@printf '    pack         Assert npm pack contents (minimal + sbom)\n'
+	@printf '    verify       Pack, audit exports, peers, and isolated imports\n'
 	@printf '    sbom         Generate software bill of materials\n'
 	@printf '    audit        Run security audit (fix mode via fix=1)\n'
-	@printf '    ci           Lint + smoke + pack\n'
+	@printf '    ci           Lint + test + verify\n'
 	@printf '    release      Release workflow (see OPTIONS)\n'
 	@printf '    clean        Remove artifacts and node_modules\n\n'
 	@printf 'OPTIONS / VARIABLES:\n'
 	@printf '    fix                If set (e.g., fix=1), apply lint/audit fixes\n'
-	@printf '    version            Release version (e.g., version=v0.1.0; VERSION= also accepted)\n'
+	@printf '    version            Release version (e.g., version=v0.1.0)\n'
 	@printf '    dry-run            If set (e.g., dry-run=1), preview release without changes\n'
 	@printf '    allow-staged       If set (e.g., allow-staged=1), include staged files in release\n'
 	@printf '    yank               If set (e.g., yank=1), yank a published version\n'
 	@printf '    NPM_INSTALL_FLAGS  Extra flags for npm install/ci (e.g. --ignore-scripts)\n'
 	@printf '    CI                 If set (CI=true), setup.sh uses npm ci\n\n'
 	@printf 'EXAMPLES:\n'
+	@printf '    make\n'
+	@printf '    make all\n'
 	@printf '    make setup\n'
 	@printf '    make lint\n'
 	@printf '    make lint fix=1\n'
@@ -97,11 +92,17 @@ version:
 	@v='$(PKG_VERSION)'; c='$(GIT_COMMIT)'; d='$(GIT_DIRTY)'; [ -n "$$v" ] || v=unknown; \
 	printf '%s %s (%s%s)\n' '$(PROJECT)' "$$v" "$$c" "$$d"
 
-setup:
+setup: .tmp
 	@chmod +x scripts/setup.sh
 	@NPM_INSTALL_FLAGS="$(NPM_INSTALL_FLAGS)" ./scripts/setup.sh
 
-lint: setup
+all:
+	$(MAKE) setup
+	$(MAKE) build
+	$(MAKE) test
+	$(MAKE) verify
+
+lint: setup .tmp
 	@echo "Running linters (mode: $(LINT_MODE))..."
 ifeq ($(LINT_MODE),fix)
 	npm run format
@@ -110,23 +111,36 @@ else
 	npm run format:check
 	npm run lint
 endif
+	for script in .husky/pre-push scripts/*.sh; do bash -n "$$script" || exit; done
 	npm run spellcheck
 
 spellcheck: setup
 	@echo "Checking spelling..."
 	npm run spellcheck
 
-smoke: setup
+smoke: build
 	@echo "Smoke-loading public exports..."
 	npm run smoke
+
+build: setup
+	@echo "Building package verification tooling..."
+	rm -rf dist
+	npm run build
+
+test: setup .tmp
+	@echo "Running package verification tests..."
+	npm run test
 
 sbom: setup
 	@echo "Generating SBOM..."
 	npm run sbom
 
-pack: sbom
-	@echo "Checking npm pack contents..."
-	npm run pack:check
+verify: build sbom .tmp
+	@echo "Verifying package exports, pins, and isolated imports..."
+	@rm -rf .package-verification
+	@trap 'rm -rf .package-verification' EXIT; \
+		./node_modules/.bin/tsc --project scripts/tsconfig.json --outDir .package-verification && \
+		node .package-verification/verify-package.js
 
 audit: setup
 	@echo "Running security audit (mode: $(AUDIT_MODE))..."
@@ -138,11 +152,14 @@ endif
 
 ci:
 	$(MAKE) lint
-	$(MAKE) smoke
-	$(MAKE) pack
+	$(MAKE) test
+	$(MAKE) verify
 
 release: setup
-	@./scripts/release.sh "$(RELEASE_VERSION)" $(RELEASE_FLAGS)
+	@DRY_RUN="$(if $(filter 1,$(dry-run)),1,)" \
+		ALLOW_STAGED="$(if $(filter 1,$(allow-staged)),1,)" \
+		YANK="$(if $(filter 1,$(yank)),1,)" \
+		./scripts/release.sh "$(RELEASE_VERSION)"
 
 clean:
-	rm -rf node_modules sbom.json .make
+	rm -rf node_modules sbom.json .make dist .package-verification .tmp

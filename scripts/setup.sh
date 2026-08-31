@@ -91,10 +91,56 @@ acquire_lock() {
 	LOCK_KIND="mkdir"
 }
 
+ensure_npm() {
+	if ! command -v jq >/dev/null 2>&1; then
+		echo "ERROR: jq is required on PATH." >&2
+		exit 1
+	fi
+	if ! command -v npm >/dev/null 2>&1; then
+		echo "ERROR: npm is required on PATH." >&2
+		exit 1
+	fi
+
+	local range
+	local floor
+	local version
+	local major
+	range="$(jq -r '.engines.npm // empty' "$ROOT/package.json")"
+	if [ -z "$range" ]; then
+		echo "ERROR: package.json engines.npm is required." >&2
+		exit 1
+	fi
+	case "$range" in
+	\>=*)
+		floor="${range#>=}"
+		floor="${floor%%.*}"
+		;;
+	*)
+		echo "ERROR: engines.npm must be a >=MAJOR range (example: >=12)." >&2
+		exit 1
+		;;
+	esac
+	if [ -z "$floor" ]; then
+		echo "ERROR: engines.npm must be a >=MAJOR range (example: >=12)." >&2
+		exit 1
+	fi
+
+	version="$(npm -v)"
+	major="${version%%.*}"
+	if [ "$major" -ge "$floor" ]; then
+		return
+	fi
+
+	echo "Installing npm ${range} (found ${version})..."
+	npm install -g "npm@${range}"
+}
+
 main() {
 	mkdir -p "$STAMP_DIR"
 	acquire_lock
 	trap release_lock EXIT
+
+	ensure_npm
 
 	# Re-check under lock: waiter may find stamp already written.
 	if setup_required; then
